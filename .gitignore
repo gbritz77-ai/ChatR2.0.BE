@@ -32,3 +32,9 @@ task-definition-ecs.json.backup
 appsettings.Development.json
 *.pfx
 *.key
+
+# AWS Setup Scripts with Credentials
+complete-aws-setup.ps1
+aws-config.txt
+*.ps1
+

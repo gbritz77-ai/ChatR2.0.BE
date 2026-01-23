@@ -11,9 +11,16 @@ Write-Host "`nAWS Account ID: $accountId" -ForegroundColor Green
 
 # Configuration
 $region = "eu-west-2"
+
 $dbPassword = Read-Host "Enter PostgreSQL password for RDS" -AsSecureString
-$dbPasswordPlain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($dbPassword))
-$jwtKey = "67&^%^%`$986070#%#HG979087078097kgfre43ikmhghdyrerfkgh(&^^**FOY^^"
+$dbPasswordPlain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($dbPassword)
+)
+
+$jwtKeySecure = Read-Host "Enter JWT signing key (will be stored in AWS Secrets Manager)" -AsSecureString
+$jwtKeyPlain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
+    [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($jwtKeySecure)
+)
 
 Write-Host "`n========================================" -ForegroundColor Yellow
 Write-Host "Step 1: Fixing Secrets Manager Policy" -ForegroundColor Yellow
@@ -49,7 +56,6 @@ Write-Host "Step 2: Creating AWS Secrets" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Yellow
 
 $rdsEndpoint = "localhost"
-
 $dbConnectionString = "Host=$rdsEndpoint;Port=5432;Database=ChatRDb;Username=postgres;Password=$dbPasswordPlain"
 
 aws secretsmanager create-secret --name chatr/db-connection --description "ChatR Database Connection String" --secret-string $dbConnectionString --region $region 2>$null
@@ -61,12 +67,12 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "✓ Database connection secret updated" -ForegroundColor Green
 }
 
-aws secretsmanager create-secret --name chatr/jwt-key --description "ChatR JWT Signing Key" --secret-string $jwtKey --region $region 2>$null
+aws secretsmanager create-secret --name chatr/jwt-key --description "ChatR JWT Signing Key" --secret-string $jwtKeyPlain --region $region 2>$null
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✓ JWT key secret created" -ForegroundColor Green
 } else {
-    aws secretsmanager update-secret --secret-id chatr/jwt-key --secret-string $jwtKey --region $region 2>$null
+    aws secretsmanager update-secret --secret-id chatr/jwt-key --secret-string $jwtKeyPlain --region $region 2>$null
     Write-Host "✓ JWT key secret updated" -ForegroundColor Green
 }
 
@@ -159,20 +165,8 @@ $taskDef = @"
 Write-Host "✓ task-definition-ecs.json created" -ForegroundColor Green
 
 Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "🎉 Setup Complete!" -ForegroundColor Green
+Write-Host "Setup Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-
-Write-Host "`n📋 Summary:" -ForegroundColor Cyan
-Write-Host "  Account ID:        $accountId"
-Write-Host "  Region:            $region"
-Write-Host "  ECR Repository:    $ecrUri"
-Write-Host "  ECS Cluster:       chatr-cluster"
-
-Write-Host "`n📝 Next Steps:" -ForegroundColor Yellow
-Write-Host "  1. Add GitHub Secrets at: https://github.com/gbritz77-ai/ChatR2.0/settings/secrets/actions"
-Write-Host "     - AWS_ACCESS_KEY_ID"
-Write-Host "     - AWS_SECRET_ACCESS_KEY"
-Write-Host "  2. Commit and push to trigger deployment"
 
 $config = @"
 AWS_ACCOUNT_ID=$accountId

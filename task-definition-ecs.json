@@ -1,0 +1,50 @@
+{
+  "family": "chatr-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::528757805971:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "chatr-api",
+      "image": "528757805971.dkr.ecr.eu-west-2.amazonaws.com/chatr-backend:latest",
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "ASPNETCORE_ENVIRONMENT",
+          "value": "Production"
+        },
+        {
+          "name": "ASPNETCORE_URLS",
+          "value": "http://+:8080"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "ConnectionStrings__DefaultConnection",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/db-connection"
+        },
+        {
+          "name": "Jwt__Key",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/jwt-key"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/chatr-api",
+          "awslogs-region": "eu-west-2",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

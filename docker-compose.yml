@@ -1,0 +1,32 @@
+﻿version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: chat-postgres
+    environment:
+      POSTGRES_DB: chatdb
+      POSTGRES_USER: chatuser
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - chat-db-data:/var/lib/postgresql/data
+
+  api:
+    build: ./Chat.Api
+    container_name: chat-api
+    ports:
+      - "5000:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=chatdb;Username=chatuser;Password=secret"
+      Jwt__Key: "SUPER_SECRET_KEY_CHANGE_ME"
+      Jwt__Issuer: "ChatApp"
+      Jwt__Audience: "ChatAppClient"
+      Jwt__ExpiresMinutes: "60"
+    depends_on:
+      - db
+
+volumes:
+  chat-db-data:

@@ -1,0 +1,34 @@
+﻿## Ignore Visual Studio temporary files, build results, etc.
+debug/
+debugPublic/
+release/
+releases/
+x64/
+x86/
+bin/
+obj/
+*.user
+*.suo
+*.sln.docstates
+.vs/
+*.userprefs
+
+# Build results
+debug/
+release/
+x64/
+x86/
+build/
+bld/
+bin/
+obj/
+
+# AWS and deployment
+aws-config.txt
+*.ps1.backup
+task-definition-ecs.json.backup
+
+# Secrets
+appsettings.Development.json
+*.pfx
+*.key

@@ -1,0 +1,278 @@
+﻿name: Deploy to AWS ECS
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REPOSITORY: chatr-backend
+  ECS_SERVICE: chatr-service
+  ECS_CLUSTER: chatr-cluster
+  ECS_TASK_DEFINITION: task-definition-ecs.json
+  CONTAINER_NAME: chatr-api
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ env.ECS_TASK_DEFINITION }}
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ steps.build-image.outputs.image }}
+
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
+
+    - name: Complete AWS Setup for ChatR Backend
+      run: |
+        echo "========================================" 
+        echo "Complete AWS Setup for ChatR Backend" 
+        echo "========================================" 
+
+        # Get Account ID
+        accountId=$(aws sts get-caller-identity --query Account --output text)
+        echo "AWS Account ID: $accountId"
+
+        # Configuration
+        region="eu-west-2"
+        read -sp "Enter PostgreSQL password for RDS: " dbPassword
+        jwtKey="67&^%^%`$986070#%#HG979087078097kgfre43ikmhghdyrerfkgh(&^^**FOY^^"
+
+        echo "========================================"
+        echo "Step 1: Fixing Secrets Manager Policy"
+        echo "========================================"
+
+        secretsPolicy="
+        {
+          \"Version\": \"2012-10-17\",
+          \"Statement\": [
+            {
+              \"Effect\": \"Allow\",
+              \"Action\": \"secretsmanager:GetSecretValue\",
+              \"Resource\": [
+                \"arn:aws:secretsmanager:$region:${accountId}:secret:chatr/db-connection-*\"
+                \"arn:aws:secretsmanager:$region:${accountId}:secret:chatr/jwt-key-*\"
+              ]
+            }
+          ]
+        }
+        "
+
+        echo $secretsPolicy > secrets-manager-policy.json
+
+        aws iam put-role-policy \
+            --role-name ecsTaskExecutionRole \
+            --policy-name SecretsManagerPolicy \
+            --policy-document file://secrets-manager-policy.json
+
+        if [ $? -eq 0 ]; then
+            echo "✓ Secrets Manager policy fixed"
+        fi
+
+        echo "========================================"
+        echo "Step 2: Creating AWS Secrets"
+        echo "========================================"
+
+        # Note: Skipping RDS creation for now - you can add it manually or use the full script
+        # For now, we'll just use localhost connection or you can create RDS separately
+
+        rdsEndpoint="localhost"  # Change this to your RDS endpoint when ready
+
+        # Create database connection secret
+        dbConnectionString="Host=$rdsEndpoint;Port=5432;Database=ChatRDb;Username=postgres;Password=$dbPassword"
+
+        aws secretsmanager create-secret \
+            --name chatr/db-connection \
+            --description "ChatR Database Connection String" \
+            --secret-string "$dbConnectionString" \
+            --region $region 2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            echo "✓ Database connection secret created"
+        else
+            aws secretsmanager update-secret \
+                --secret-id chatr/db-connection \
+                --secret-string "$dbConnectionString" \
+                --region $region 2>/dev/null
+            echo "✓ Database connection secret updated"
+        fi
+
+        # Create JWT key secret  
+        aws secretsmanager create-secret \
+            --name chatr/jwt-key \
+            --description "ChatR JWT Signing Key" \
+            --secret-string "$jwtKey" \
+            --region $region 2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            echo "✓ JWT key secret created"
+        else
+            aws secretsmanager update-secret \
+                --secret-id chatr/jwt-key \
+                --secret-string "$jwtKey" \
+                --region $region 2>/dev/null
+            echo "✓ JWT key secret updated"
+        fi
+
+        echo "========================================"
+        echo "Step 3: Creating ECR Repository"
+        echo "========================================"
+
+        aws ecr create-repository \
+            --repository-name chatr-backend \
+            --region $region \
+            --image-scanning-configuration scanOnPush=true 2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            echo "✓ ECR repository created"
+        else
+            echo "✓ ECR repository already exists"
+        fi
+
+        ecrUri=$(aws ecr describe-repositories \
+            --repository-names chatr-backend \
+            --query "repositories[0].repositoryUri" \
+            --output text \
+            --region $region)
+
+        echo "ECR URI: $ecrUri"
+
+        echo "========================================"
+        echo "Step 4: Creating ECS Cluster"
+        echo "========================================"
+
+        aws ecs create-cluster \
+            --cluster-name chatr-cluster \
+            --region $region 2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            echo "✓ ECS cluster created"
+        else
+            echo "✓ ECS cluster already exists"
+        fi
+
+        echo "========================================"
+        echo "Step 5: Creating Task Definition"
+        echo "========================================"
+
+        taskDef="
+        {
+          \"family\": \"chatr-task\",
+          \"networkMode\": \"awsvpc\",
+          \"requiresCompatibilities\": [\"FARGATE\"],
+          \"cpu\": \"256\",
+          \"memory\": \"512\",
+          \"executionRoleArn\": \"arn:aws:iam::${accountId}:role/ecsTaskExecutionRole\",
+          \"containerDefinitions\": [
+            {
+              \"name\": \"chatr-api\",
+              \"image\": \"${ecrUri}:latest\",
+              \"portMappings\": [
+                {
+                  \"containerPort\": 8080,
+                  \"protocol\": \"tcp\"
+                }
+              ],
+              \"essential\": true,
+              \"environment\": [
+                {
+                  \"name\": \"ASPNETCORE_ENVIRONMENT\",
+                  \"value\": \"Production\"
+                },
+                {
+                  \"name\": \"ASPNETCORE_URLS\",
+                  \"value\": \"http://+:8080\"
+                }
+              ],
+              \"secrets\": [
+                {
+                  \"name\": \"ConnectionStrings__DefaultConnection\",
+                  \"valueFrom\": \"arn:aws:secretsmanager:${region}:${accountId}:secret:chatr/db-connection\"
+                },
+                {
+                  \"name\": \"Jwt__Key\",
+                  \"valueFrom\": \"arn:aws:secretsmanager:${region}:${accountId}:secret:chatr/jwt-key\"
+                }
+              ],
+              \"logConfiguration\": {
+                \"logDriver\": \"awslogs\",
+                \"options\": {
+                  \"awslogs-group\": \"/ecs/chatr-api\",
+                  \"awslogs-region\": \"${region}\",
+                  \"awslogs-stream-prefix\": \"ecs\",
+                  \"awslogs-create-group\": \"true\"
+                }
+              }
+            }
+          ]
+        }
+        "
+
+        echo $taskDef > task-definition-ecs.json
+        echo "✓ task-definition-ecs.json created"
+
+        echo "========================================"
+        echo "🎉 Setup Complete!"
+        echo "========================================"
+
+        echo "📋 Summary:"
+        echo "  Account ID:        $accountId"
+        echo "  Region:            $region"
+        echo "  ECR Repository:    $ecrUri"
+        echo "  ECS Cluster:       chatr-cluster"
+        echo "  Task Definition:   task-definition-ecs.json"
+
+        echo "📝 Next Steps:"
+        echo "  1. Create RDS Database manually via AWS Console"
+        echo "  2. Update the secret 'chatr/db-connection' with actual RDS endpoint"
+        echo "  3. Add GitHub Secrets:"
+        echo "     - AWS_ACCESS_KEY_ID"
+        echo "     - AWS_SECRET_ACCESS_KEY"
+        echo "  4. Push to GitHub to trigger deployment"
+
+        config="
+        AWS_ACCOUNT_ID=$accountId
+        AWS_REGION=$region
+        ECR_URI=$ecrUri
+        ECS_CLUSTER=chatr-cluster
+        ECS_SERVICE=chatr-service
+        "
+
+        echo "$config" > aws-config.txt
+        echo "✓ Configuration saved to aws-config.txt"

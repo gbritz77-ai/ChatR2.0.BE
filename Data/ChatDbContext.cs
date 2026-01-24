@@ -31,9 +31,8 @@ namespace Chat.Api.Data
 
             // Relationships
             modelBuilder.Entity<ChatMember>()
-                .HasOne(cm => cm.User)
-                .WithMany(u => u.ChatMembers)
-                .HasForeignKey(cm => cm.UserId);
+                 .HasIndex(x => new { x.ChatId, x.UserId })
+                 .IsUnique();
 
             modelBuilder.Entity<ChatMember>()
                 .HasOne(cm => cm.Chat)

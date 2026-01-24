@@ -29,7 +29,7 @@ namespace Chat.Api.Controllers
         // DTOs (nested records) ---------------------------------
         public record CreatePrivateChatRequest(Guid TargetUserId);
         public record CreateGroupChatRequest(string Name, List<Guid> MemberIds);
-        public record SendMessageRequest(string Text, List<Guid>? AttachmentIds = null, string? GifUrl = null);
+        public record SendMessageRequest(string? Text, List<Guid>? AttachmentIds = null, string? GifUrl = null);
 
         // Member management DTO
         public record AddMemberRequest(Guid UserId);
@@ -100,16 +100,15 @@ namespace Chat.Api.Controllers
                 return BadRequest("Cannot create private chat with yourself");
 
             // Check if chat already exists between the two users
-            var existingChatId = await _db.ChatMembers
-                .Where(cm => cm.UserId == userId)
-                .Select(cm => cm.ChatId)
-                .Intersect(
-                    _db.ChatMembers
-                        .Where(cm => cm.UserId == targetId)
-                        .Select(cm => cm.ChatId)
-                )
-                .Select(id => (Guid?)id)
-                .FirstOrDefaultAsync();
+            // Check if chat already exists between the two users (MySQL-safe)
+            var existingChatId = await (
+                from cm in _db.ChatMembers
+                join c in _db.Chats on cm.ChatId equals c.Id
+                where cm.UserId == userId
+                      && !c.IsGroup
+                      && _db.ChatMembers.Any(cm2 => cm2.ChatId == cm.ChatId && cm2.UserId == targetId)
+                select (Guid?)cm.ChatId
+            ).FirstOrDefaultAsync();
 
             ChatEntity chat;
 
@@ -415,7 +414,14 @@ namespace Chat.Api.Controllers
         {
             var userId = User.GetUserId();
 
-            if (string.IsNullOrWhiteSpace(request.Text) && (request.AttachmentIds == null || !request.AttachmentIds.Any()) && string.IsNullOrWhiteSpace(request.GifUrl))
+            var text = request.Text?.Trim();
+            var gifUrl = request.GifUrl?.Trim();
+
+            var hasText = !string.IsNullOrWhiteSpace(text);
+            var hasGif = !string.IsNullOrWhiteSpace(gifUrl);
+            var hasAttachments = request.AttachmentIds?.Any() == true;
+
+            if (!hasText && !hasGif && !hasAttachments)
                 return BadRequest("Message text, attachments or gif url required");
 
             var isMember = await _db.ChatMembers
@@ -429,8 +435,8 @@ namespace Chat.Api.Controllers
                 Id = Guid.NewGuid(),
                 ChatId = chatId,
                 SenderId = userId,
-                Text = request.Text ?? string.Empty,
-                GifUrl = request.GifUrl,
+                Text = hasText ? text! : string.Empty,
+                GifUrl = hasGif ? gifUrl : null,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -439,13 +445,11 @@ namespace Chat.Api.Controllers
 
             // Attach pre-uploaded attachments (if any)
             List<Attachment> attached = new();
-            if (request.AttachmentIds?.Any() == true)
+            if (hasAttachments)
             {
                 attached = await _db.Attachments
-                    .Where(a => request.AttachmentIds.Contains(a.Id) && a.MessageId == null)
+                    .Where(a => request.AttachmentIds!.Contains(a.Id) && a.MessageId == null)
                     .ToListAsync();
-
-                // Optionally: validate that attachments were uploaded by the caller or verify other ownership rules
 
                 foreach (var a in attached)
                     a.MessageId = message.Id;
@@ -474,7 +478,7 @@ namespace Chat.Api.Controllers
                 SenderUserName = senderUserName,
                 message.Text,
                 message.CreatedAt,
-                GifUrl = request.GifUrl,
+                GifUrl = message.GifUrl,
                 Attachments = attachmentDtos
             };
 
@@ -483,6 +487,8 @@ namespace Chat.Api.Controllers
 
             return Ok(dto);
         }
+
+
 
 
     }

@@ -14,16 +14,22 @@ Write-Host "  5. Push to GitHub to trigger deployment" -ForegroundColor Yellow
 # -------------------------------
 Write-Host "`nCreating/Updating Secrets Manager values (no hardcoded secrets)..." -ForegroundColor Yellow
 
-# Prompt for RDS endpoint + password at runtime
-$rdsEndpoint = Read-Host "Enter RDS endpoint (e.g. mydb.xxxxx.eu-west-2.rds.amazonaws.com)"
-$dbPasswordSecure = Read-Host "Enter PostgreSQL password for RDS" -AsSecureString
+# Prompt for MariaDB endpoint + username + password at runtime
+$dbHost = Read-Host "Enter MariaDB host (e.g. 3.253.55.197)"
+$dbPort = Read-Host "Enter MariaDB port (default 3306)"
+if ([string]::IsNullOrWhiteSpace($dbPort)) { $dbPort = "3306" }
+
+$dbName = Read-Host "Enter MariaDB database name"
+$dbUser = Read-Host "Enter MariaDB username"
+$dbPasswordSecure = Read-Host "Enter MariaDB password" -AsSecureString
 
 # Convert SecureString -> plain (needed because AWS CLI needs a real string)
 $dbPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($dbPasswordSecure)
 )
 
-$dbConnectionString = "Host=$rdsEndpoint;Port=5432;Database=ChatRDb;Username=postgres;Password=$dbPasswordPlain"
+# MariaDB/MySQL connection string (ADO.NET style)
+$dbConnectionString = "Server=$dbHost;Port=$dbPort;Database=$dbName;User ID=$dbUser;Password=$dbPasswordPlain;SslMode=Preferred;"
 
 # Generate strong JWT key at runtime (base64)
 Add-Type -AssemblyName System.Security

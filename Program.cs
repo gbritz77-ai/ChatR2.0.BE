@@ -9,11 +9,14 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---------- DbContext ----------
+// ---------- DbContext ---------
 builder.Services.AddDbContext<ChatDbContext>(options =>
 {
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"));
+    var cs = builder.Configuration.GetConnectionString("DefaultConnection");
+    options.UseMySql(cs, ServerVersion.AutoDetect(cs));
 });
+
+
 
 // ---------- CORS (dev: allow all origins) ----------
 const string FrontendPolicy = "FrontendPolicy";

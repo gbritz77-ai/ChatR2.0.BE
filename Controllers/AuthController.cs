@@ -1,7 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using BCrypt.Net;
+﻿using BCrypt.Net;
 using Chat.Api.Data;
 using Chat.Api.DTOs.Auth;
 using Chat.Api.Models;
@@ -9,6 +6,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 namespace Chat.Api.Controllers
 {
@@ -28,6 +29,9 @@ namespace Chat.Api.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
+            if (request == null)
+                return BadRequest("Request body is required.");
+
             if (string.IsNullOrWhiteSpace(request.Username) ||
                 string.IsNullOrWhiteSpace(request.Email) ||
                 string.IsNullOrWhiteSpace(request.Password))
@@ -35,19 +39,18 @@ namespace Chat.Api.Controllers
                 return BadRequest("Username, email and password are required.");
             }
 
-            var exists = await _db.Users
-                .AnyAsync(u => u.Username == request.Username || u.Email == request.Email);
+            var username = request.Username.Trim();
+            var email = request.Email.Trim();
 
+            var exists = await _db.Users.AnyAsync(u => u.Username == username || u.Email == email);
             if (exists)
-            {
                 return Conflict("Username or email already exists.");
-            }
 
             var user = new User
             {
                 Id = Guid.NewGuid(),
-                Username = request.Username.Trim(),
-                Email = request.Email.Trim(),
+                Username = username,
+                Email = email,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
                 Role = UserRole.Staff
             };
@@ -61,22 +64,28 @@ namespace Chat.Api.Controllers
         [HttpPost("login")]
         public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
         {
-           var user = await _db.Users
-                .FirstOrDefaultAsync(u =>
-                    u.Username == request.UsernameOrEmail ||
-                    u.Email == request.UsernameOrEmail);
+            if (request == null)
+                return BadRequest("Request body is required.");
 
+            if (string.IsNullOrWhiteSpace(request.UsernameOrEmail) || string.IsNullOrWhiteSpace(request.Password))
+                return BadRequest("Username/email and password are required.");
+
+            var login = request.UsernameOrEmail.Trim();
+
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == login || u.Email == login);
             if (user == null)
                 return Unauthorized("Invalid credentials");
 
             if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
                 return Unauthorized("Invalid credentials");
 
-            var token = GenerateJwt(user, out DateTime expiresAt);
+            // If JWT config is missing, return a clean error instead of throwing a 500.
+            if (!TryGenerateJwt(user, out var token, out var expiresAt, out var error))
+                return StatusCode(500, error);
 
             return new LoginResponse
             {
-                Token = token,
+                Token = token!,
                 ExpiresAt = expiresAt,
                 Username = user.Username,
                 Role = user.Role.ToString()
@@ -87,41 +96,76 @@ namespace Chat.Api.Controllers
         [HttpGet("me")]
         public IActionResult Me()
         {
+            // This will work reliably if you include JwtRegisteredClaimNames.UniqueName (see token generation below)
             var username = User.Identity?.Name ?? "";
             var role = User.FindFirstValue(ClaimTypes.Role) ?? "";
 
+            // Also return the user id for debugging / client needs
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+
             return Ok(new
             {
+                UserId = userId,
                 Username = username,
                 Role = role
             });
         }
 
-        private string GenerateJwt(User user, out DateTime expiresAt)
+        private bool TryGenerateJwt(User user, out string? token, out DateTime expiresAt, out string? error)
         {
-            var jwtSection = _config.GetSection("Jwt");
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["Key"]!));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            token = null;
+            error = null;
 
-            expiresAt = DateTime.UtcNow.AddMinutes(double.Parse(jwtSection["ExpiresMinutes"]!));
+            var jwt = _config.GetSection("Jwt");
+
+            var keyString = jwt["Key"];
+            var issuer = jwt["Issuer"];
+            var audience = jwt["Audience"];
+            var expiresText = jwt["ExpiresMinutes"]; // e.g. "120"
+
+            if (string.IsNullOrWhiteSpace(keyString) ||
+                string.IsNullOrWhiteSpace(issuer) ||
+                string.IsNullOrWhiteSpace(audience))
+            {
+                expiresAt = DateTime.UtcNow;
+                error = "JWT is not configured on the server (Jwt:Key/Issuer/Audience).";
+                return false;
+            }
+
+            double expiresMinutes = 120;
+            if (!string.IsNullOrWhiteSpace(expiresText))
+            {
+                if (!double.TryParse(expiresText, NumberStyles.Float, CultureInfo.InvariantCulture, out expiresMinutes) || expiresMinutes <= 0)
+                    expiresMinutes = 120;
+            }
+
+            expiresAt = DateTime.UtcNow.AddMinutes(expiresMinutes);
+
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(keyString));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var claims = new List<Claim>
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()), // <- ensure GetUserId() can find id
-                new Claim(ClaimTypes.Name, user.Username),
-                new Claim(ClaimTypes.Role, user.Role.ToString())
+                new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+
+                // IMPORTANT: ensures User.Identity.Name is populated by default JWT handler
+                new(JwtRegisteredClaimNames.UniqueName, user.Username ?? string.Empty),
+
+                new(ClaimTypes.Role, user.Role.ToString())
             };
 
-            var token = new JwtSecurityToken(
-                issuer: jwtSection["Issuer"],
-                audience: jwtSection["Audience"],
+            var jwtToken = new JwtSecurityToken(
+                issuer: issuer,
+                audience: audience,
                 claims: claims,
+                notBefore: DateTime.UtcNow,
                 expires: expiresAt,
                 signingCredentials: creds
             );
 
-            return new JwtSecurityTokenHandler().WriteToken(token);
+            token = new JwtSecurityTokenHandler().WriteToken(jwtToken);
+            return true;
         }
     }
 }

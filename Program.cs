@@ -26,12 +26,12 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(
                 "http://localhost:5173",
-                "https://dev.d3rrkqgvvakfxn.amplifyapp.com"
+                "https://main.d1imfsef8qotjc.amplifyapp.com"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
-            // Keep AllowCredentials ONLY if you truly use cookies/credentials.
-            // If you're using Authorization: Bearer tokens only, it's safe to remove it.
+            // If you are NOT using cookies, you can remove AllowCredentials().
+            // Leaving it enabled is OK as long as you use WithOrigins (not AllowAnyOrigin).
             .AllowCredentials();
     });
 });
@@ -41,39 +41,21 @@ builder.Services.AddControllers();
 builder.Services.AddSignalR();
 builder.Services.AddHttpContextAccessor();
 
-// ---------- JWT Auth (FIXED: no startup crash) ----------
+// ---------- JWT Auth (won't crash if missing) ----------
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSection["Key"];
 var jwtIssuer = jwtSection["Issuer"];
 var jwtAudience = jwtSection["Audience"];
 
-// Always register auth services, but only configure JWT if we have valid config.
-// This prevents ECS crash loops while still allowing JWT when configured.
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
-{
-    // If JWT config is missing, don't crash.
-    // Leave TokenValidationParameters minimal; any auth attempt will fail safely with 401.
-    if (string.IsNullOrWhiteSpace(jwtKey) ||
-        string.IsNullOrWhiteSpace(jwtIssuer) ||
-        string.IsNullOrWhiteSpace(jwtAudience))
+builder.Services
+    .AddAuthentication(options =>
     {
-        // Optional: log a warning (shows in CloudWatch)
-        Console.WriteLine("⚠ JWT config missing (Jwt:Key/Issuer/Audience). API will start, but auth will return 401 until configured.");
-
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = false,
-            ValidateAudience = false,
-            ValidateIssuerSigningKey = false,
-            ValidateLifetime = false
-        };
-
-        // Still support SignalR token-from-query, but it won't validate until JWT config exists.
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        // Always allow SignalR token-from-query
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -82,51 +64,44 @@ builder.Services.AddAuthentication(options =>
                 var path = context.HttpContext.Request.Path;
 
                 if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/chat"))
-                {
                     context.Token = accessToken;
-                }
 
                 return Task.CompletedTask;
             }
         };
 
-        return;
-    }
-
-    // Normal JWT config path
-    var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
-
-    options.RequireHttpsMetadata = false; // OK behind ALB; set true once you move everything to HTTPS end-to-end
-    options.SaveToken = true;
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtIssuer,
-        ValidAudience = jwtAudience,
-        IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
-        ClockSkew = TimeSpan.Zero
-    };
-
-    // Enable SignalR auth via querystring ?access_token=
-    options.Events = new JwtBearerEvents
-    {
-        OnMessageReceived = context =>
+        // If config is missing, don't crash the container; auth will fail with 401 when used.
+        if (string.IsNullOrWhiteSpace(jwtKey) ||
+            string.IsNullOrWhiteSpace(jwtIssuer) ||
+            string.IsNullOrWhiteSpace(jwtAudience))
         {
-            var accessToken = context.Request.Query["access_token"];
-            var path = context.HttpContext.Request.Path;
-
-            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/chat"))
+            Console.WriteLine("⚠ JWT config missing (Jwt:Key/Issuer/Audience). API will start, but protected endpoints will return 401.");
+            options.TokenValidationParameters = new TokenValidationParameters
             {
-                context.Token = accessToken;
-            }
-
-            return Task.CompletedTask;
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateIssuerSigningKey = false,
+                ValidateLifetime = false
+            };
+            return;
         }
-    };
-});
+
+        var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
+
+        options.RequireHttpsMetadata = false; // OK behind ALB/CloudFront
+        options.SaveToken = true;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
+            ClockSkew = TimeSpan.Zero
+        };
+    });
 
 builder.Services.AddAuthorization();
 
@@ -166,16 +141,24 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// NOTE: In production on ECS, you probably still want Swagger.
-// If you want Swagger in Production too, remove this if-block and enable it always.
+// Swagger only in dev (fine)
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
+// IMPORTANT behind ALB/CloudFront: trust X-Forwarded-* so HTTPS is detected correctly
+app.UseForwardedHeaders();
+
 app.UseHttpsRedirection();
+
 app.UseCors(FrontendPolicy);
+
+// ✅ FIX: Handle ALL CORS preflight (OPTIONS) BEFORE controllers
+app.MapMethods("{*path}", new[] { "OPTIONS" }, () => Results.Ok())
+   .AllowAnonymous()
+   .RequireCors(FrontendPolicy);
 
 app.UseAuthentication();
 app.UseAuthorization();

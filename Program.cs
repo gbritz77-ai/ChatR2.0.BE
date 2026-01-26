@@ -12,9 +12,13 @@ var builder = WebApplication.CreateBuilder(args);
 // ---------- DbContext ----------
 builder.Services.AddDbContext<ChatDbContext>(options =>
 {
-    var cs = builder.Configuration.GetConnectionString("DefaultConnection");
-    options.UseMySql(cs, ServerVersion.AutoDetect(cs));
+    var cs = builder.Configuration.GetConnectionString("DefaultConnection")
+             ?? throw new InvalidOperationException("DefaultConnection is missing.");
+
+    // ✅ Don't use AutoDetect in ECS (it opens a connection during startup)
+    options.UseMySql(cs, new MySqlServerVersion(new Version(8, 0, 36)));
 });
+
 
 // ---------- CORS ----------
 const string FrontendPolicy = "FrontendPolicy";

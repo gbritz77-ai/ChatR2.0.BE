@@ -26,7 +26,11 @@ builder.Services.AddCors(options =>
     options.AddPolicy(FrontendPolicy, policy =>
     {
         policy
-            .SetIsOriginAllowed(_ => true)  // ✅ any origin for dev
+        .WithOrigins(
+                "http://localhost:5173",
+                "https://dev.d3rrkqgvvakfxn.amplifyapp.com"
+            )
+            //.SetIsOriginAllowed(_ => true)  // ✅ any origin for dev
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -141,6 +145,7 @@ app.UseHttpsRedirection();
 app.UseCors(FrontendPolicy);
 app.UseAuthentication();
 app.UseAuthorization();
+
 
 // Health check endpoint for ECS/Load Balancer
 app.MapGet("/health", () => Results.Ok(new 

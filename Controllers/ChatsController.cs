@@ -50,7 +50,6 @@ namespace Chat.Api.Controllers
         {
             var userId = User.GetUserId();
 
-            // First pull the raw chat + membership info
             var items = await _db.ChatMembers
                 .Where(cm => cm.UserId == userId)
                 .Include(cm => cm.Chat)
@@ -62,23 +61,24 @@ namespace Chat.Api.Controllers
                     cm.IsAdmin,
                     cm.JoinedAt,
                     cm.LastReadAt,
-                    // we’ll compute other user name in a subquery
+
                     OtherUserName = _db.ChatMembers
                         .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
-                        .Select(x => x.User!.Username)   // assumes ChatMember has `User` nav
+                        .Select(x => x.User!.Username)
                         .FirstOrDefault(),
+
+                    // ✅ FIX: don't count your own messages as unread
                     UnreadCount = _db.Messages.Count(m =>
                         m.ChatId == cm.ChatId &&
+                        m.SenderId != userId &&
                         (cm.LastReadAt == null || m.CreatedAt > cm.LastReadAt))
                 })
                 .ToListAsync();
 
-            // Shape it into the DTO your React app expects
             var result = items.Select(i => new
             {
                 chatId = i.ChatId,
                 isGroup = i.IsGroup,
-                // For groups: use ChatName, for direct: use other user, with sensible fallbacks
                 name = i.IsGroup
                     ? (i.ChatName ?? "Group chat")
                     : (i.OtherUserName ?? "Direct chat"),
@@ -87,6 +87,7 @@ namespace Chat.Api.Controllers
 
             return Ok(result);
         }
+
 
         // POST api/chats/private
         // Create or reuse a 1-to-1 chat between current user and target user
@@ -482,11 +483,30 @@ namespace Chat.Api.Controllers
                 Attachments = attachmentDtos
             };
 
+            // 1) Push the message to anyone viewing this chat
             await _chatHub.Clients.Group(chatId.ToString())
                 .SendAsync("ReceiveMessage", dto);
 
+            // 2) Notify chat members (except sender) to refresh sidebar / unread counts
+            var memberIds = await _db.ChatMembers
+                .Where(cm => cm.ChatId == chatId)
+                .Select(cm => cm.UserId)
+                .ToListAsync();
+
+            foreach (var memberId in memberIds.Where(id => id != userId))
+            {
+                await _chatHub.Clients.User(memberId.ToString())
+                    .SendAsync("ChatUpdated", new
+                    {
+                        chatId,
+                        lastMessageAt = message.CreatedAt,
+                        lastMessagePreview = hasText ? text : (hasGif ? "GIF" : "Attachment")
+                    });
+            }
+
             return Ok(dto);
         }
+
 
 
 

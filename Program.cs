@@ -3,6 +3,7 @@ using System.Text;
 using Chat.Api.Data;
 using Chat.Api.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -15,10 +16,8 @@ builder.Services.AddDbContext<ChatDbContext>(options =>
     var cs = builder.Configuration.GetConnectionString("DefaultConnection")
              ?? throw new InvalidOperationException("DefaultConnection is missing.");
 
-    // ✅ Don't use AutoDetect in ECS (it opens a connection during startup)
     options.UseMySql(cs, new MySqlServerVersion(new Version(8, 0, 36)));
 });
-
 
 // ---------- CORS ----------
 const string FrontendPolicy = "FrontendPolicy";
@@ -30,12 +29,11 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(
                 "http://localhost:5173",
-                "https://main.d1imfsef8qotjc.amplifyapp.com"
+                "https://main.d1imfsef8qotjc.amplifyapp.com",
+                "https://d1gnxnjelgzuho.cloudfront.net" // ✅ add CloudFront too
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
-            // If you are NOT using cookies, you can remove AllowCredentials().
-            // Leaving it enabled is OK as long as you use WithOrigins (not AllowAnyOrigin).
             .AllowCredentials();
     });
 });
@@ -45,7 +43,16 @@ builder.Services.AddControllers();
 builder.Services.AddSignalR();
 builder.Services.AddHttpContextAccessor();
 
-// ---------- JWT Auth (won't crash if missing) ----------
+// ---------- Forwarded headers (behind ALB/CloudFront) ----------
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // In AWS, proxies are not known at compile time:
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+// ---------- JWT Auth ----------
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSection["Key"];
 var jwtIssuer = jwtSection["Issuer"];
@@ -59,7 +66,6 @@ builder.Services
     })
     .AddJwtBearer(options =>
     {
-        // Always allow SignalR token-from-query
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = context =>
@@ -74,7 +80,6 @@ builder.Services
             }
         };
 
-        // If config is missing, don't crash the container; auth will fail with 401 when used.
         if (string.IsNullOrWhiteSpace(jwtKey) ||
             string.IsNullOrWhiteSpace(jwtIssuer) ||
             string.IsNullOrWhiteSpace(jwtAudience))
@@ -90,10 +95,9 @@ builder.Services
             return;
         }
 
-        var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
-
         options.RequireHttpsMetadata = false; // OK behind ALB/CloudFront
         options.SaveToken = true;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -102,7 +106,7 @@ builder.Services
             ValidateIssuerSigningKey = true,
             ValidIssuer = jwtIssuer,
             ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
             ClockSkew = TimeSpan.Zero
         };
     });
@@ -126,7 +130,6 @@ builder.Services.AddSwaggerGen(c =>
     };
 
     c.AddSecurityDefinition("Bearer", securityScheme);
-
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
@@ -145,24 +148,36 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Swagger only in dev (fine)
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-// IMPORTANT behind ALB/CloudFront: trust X-Forwarded-* so HTTPS is detected correctly
+// ✅ MUST be early so scheme/host are correct behind ALB/CloudFront
 app.UseForwardedHeaders();
 
-app.UseHttpsRedirection();
+// If you terminate TLS at CloudFront/ALB, you typically DON'T need HTTPS redirection here.
+// It can cause odd redirects in some setups. Safe to keep off for now.
+//// app.UseHttpsRedirection();
 
 app.UseCors(FrontendPolicy);
 
-// ✅ FIX: Handle ALL CORS preflight (OPTIONS) BEFORE controllers
-app.MapMethods("{*path}", new[] { "OPTIONS" }, () => Results.Ok())
+// ✅ Preflight handling: restrict to API + hubs only (NOT all paths)
+// This avoids breaking /swagger/* and any other static endpoints.
+app.MapMethods("/api/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
    .AllowAnonymous()
    .RequireCors(FrontendPolicy);
+
+app.MapMethods("/hubs/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
+   .AllowAnonymous()
+   .RequireCors(FrontendPolicy);
+
+// ✅ Enable Swagger when you want it
+// Option A: enable always (useful while debugging prod):
+app.UseSwagger();
+app.UseSwaggerUI();
+
+// Option B (alternative): only enable when env var is set
+// if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("EnableSwagger"))
+// {
+//     app.UseSwagger();
+//     app.UseSwaggerUI();
+// }
 
 app.UseAuthentication();
 app.UseAuthorization();

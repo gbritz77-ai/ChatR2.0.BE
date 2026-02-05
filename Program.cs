@@ -12,8 +12,6 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 
-
-
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------- DbContext ----------

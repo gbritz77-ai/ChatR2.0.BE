@@ -129,7 +129,7 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-// ---------- Swagger ----------
+// ---------- Swagger --------------
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {

@@ -1,6 +1,7 @@
 ﻿// Program.cs
 using System.Text;
 using Amazon;
+using Amazon.Runtime;
 using Amazon.S3;
 using Chat.Api.Data;
 using Chat.Api.Hubs;
@@ -9,6 +10,9 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+
+
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -40,22 +44,24 @@ builder.Services.AddCors(options =>
     });
 });
 
-// ---------- AWS / S3 ----------
-// IMPORTANT:
-// This uses the default AWS credential chain, which in ECS/Fargate will use the Task Role.
+//S3
 builder.Services.AddSingleton<IAmazonS3>(_ =>
 {
-    // Prefer env/config, fallback to eu-west-2
+    // ECS/Fargate automatically provides credentials via Task Role
+    // Fallback chain includes Environment, ECS Task Role, Instance profile, etc.
+    var creds = FallbackCredentialsFactory.GetCredentials();
+
+    // Region from ECS env var AWS_REGION or config, fallback eu-west-2
     var regionName =
-        builder.Configuration["AWS:Region"]
+        Environment.GetEnvironmentVariable("AWS_REGION")
+        ?? builder.Configuration["AWS:Region"]
         ?? builder.Configuration["AWS__Region"]
-        ?? Environment.GetEnvironmentVariable("AWS_REGION")
         ?? "eu-west-2";
 
     var region = RegionEndpoint.GetBySystemName(regionName);
-    return new AmazonS3Client(region);
-});
 
+    return new AmazonS3Client(creds, region);
+});
 // ---------- Controllers & SignalR ----------
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
@@ -75,6 +81,15 @@ var jwtKey = jwtSection["Key"];
 var jwtIssuer = jwtSection["Issuer"];
 var jwtAudience = jwtSection["Audience"];
 
+if (string.IsNullOrWhiteSpace(jwtKey) ||
+    string.IsNullOrWhiteSpace(jwtIssuer) ||
+    string.IsNullOrWhiteSpace(jwtAudience))
+{
+    // Fail fast so you see the real reason in CloudWatch/ECS events,
+    // instead of random 500s during login.
+    throw new InvalidOperationException("JWT config missing: Jwt:Key/Issuer/Audience");
+}
+
 builder.Services
     .AddAuthentication(options =>
     {
@@ -87,6 +102,7 @@ builder.Services
         {
             OnMessageReceived = context =>
             {
+                // SignalR token via query string
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
 
@@ -97,23 +113,7 @@ builder.Services
             }
         };
 
-        if (string.IsNullOrWhiteSpace(jwtKey) ||
-            string.IsNullOrWhiteSpace(jwtIssuer) ||
-            string.IsNullOrWhiteSpace(jwtAudience))
-        {
-            // Start API, but protected endpoints will fail
-            Console.WriteLine("⚠ JWT config missing (Jwt:Key/Issuer/Audience).");
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = false,
-                ValidateAudience = false,
-                ValidateIssuerSigningKey = false,
-                ValidateLifetime = false
-            };
-            return;
-        }
-
-        options.RequireHttpsMetadata = false;
+        options.RequireHttpsMetadata = false; // OK behind ALB/CloudFront
         options.SaveToken = true;
 
         options.TokenValidationParameters = new TokenValidationParameters
@@ -166,16 +166,22 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// MUST be early so scheme/host are correct behind ALB/CloudFront
+// ✅ MUST be early so scheme/host are correct behind ALB/CloudFront
 app.UseForwardedHeaders();
 
-// ✅ Explicit routing makes CORS + endpoints behave predictably
+// ✅ CORS ordering
 app.UseRouting();
-
-// ✅ CORS must be after routing and before auth
 app.UseCors(FrontendPolicy);
 
-// ✅ Preflight handling for API + hubs
+// ✅ Swagger
+app.UseSwagger();
+app.UseSwaggerUI();
+
+// ✅ Auth
+app.UseAuthentication();
+app.UseAuthorization();
+
+// ✅ Preflight handling (optional, but safe)
 app.MapMethods("/api/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
    .AllowAnonymous()
    .RequireCors(FrontendPolicy);
@@ -183,14 +189,6 @@ app.MapMethods("/api/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
 app.MapMethods("/hubs/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
    .AllowAnonymous()
    .RequireCors(FrontendPolicy);
-
-// Swagger
-app.UseSwagger();
-app.UseSwaggerUI();
-
-// Auth
-app.UseAuthentication();
-app.UseAuthorization();
 
 // Health check endpoint for ECS/Load Balancer
 app.MapGet("/health", () => Results.Ok(new

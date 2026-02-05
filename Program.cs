@@ -1,5 +1,7 @@
 ﻿// Program.cs
 using System.Text;
+using Amazon;
+using Amazon.S3;
 using Chat.Api.Data;
 using Chat.Api.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -7,10 +9,6 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using Amazon.S3;
-using Amazon;
-//using Amazon.Extensions.NETCore.Setup;
-
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,7 +32,7 @@ builder.Services.AddCors(options =>
             .WithOrigins(
                 "http://localhost:5173",
                 "https://main.d1imfsef8qotjc.amplifyapp.com",
-                "https://d1gnxnjelgzuho.cloudfront.net" // ✅ add CloudFront too
+                "https://d1gnxnjelgzuho.cloudfront.net"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -42,12 +40,21 @@ builder.Services.AddCors(options =>
     });
 });
 
-// S3 (manual registration; no Extensions package needed)
+// ---------- AWS / S3 ----------
+// IMPORTANT:
+// This uses the default AWS credential chain, which in ECS/Fargate will use the Task Role.
 builder.Services.AddSingleton<IAmazonS3>(_ =>
-    new AmazonS3Client(RegionEndpoint.EUWest2)
-);
+{
+    // Prefer env/config, fallback to eu-west-2
+    var regionName =
+        builder.Configuration["AWS:Region"]
+        ?? builder.Configuration["AWS__Region"]
+        ?? Environment.GetEnvironmentVariable("AWS_REGION")
+        ?? "eu-west-2";
 
-
+    var region = RegionEndpoint.GetBySystemName(regionName);
+    return new AmazonS3Client(region);
+});
 
 // ---------- Controllers & SignalR ----------
 builder.Services.AddControllers();
@@ -58,7 +65,6 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    // In AWS, proxies are not known at compile time:
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
@@ -95,7 +101,8 @@ builder.Services
             string.IsNullOrWhiteSpace(jwtIssuer) ||
             string.IsNullOrWhiteSpace(jwtAudience))
         {
-            Console.WriteLine("⚠ JWT config missing (Jwt:Key/Issuer/Audience). API will start, but protected endpoints will return 401.");
+            // Start API, but protected endpoints will fail
+            Console.WriteLine("⚠ JWT config missing (Jwt:Key/Issuer/Audience).");
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = false,
@@ -106,7 +113,7 @@ builder.Services
             return;
         }
 
-        options.RequireHttpsMetadata = false; // OK behind ALB/CloudFront
+        options.RequireHttpsMetadata = false;
         options.SaveToken = true;
 
         options.TokenValidationParameters = new TokenValidationParameters
@@ -159,17 +166,16 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// ✅ MUST be early so scheme/host are correct behind ALB/CloudFront
+// MUST be early so scheme/host are correct behind ALB/CloudFront
 app.UseForwardedHeaders();
 
-// If you terminate TLS at CloudFront/ALB, you typically DON'T need HTTPS redirection here.
-// It can cause odd redirects in some setups. Safe to keep off for now.
-//// app.UseHttpsRedirection();
+// ✅ Explicit routing makes CORS + endpoints behave predictably
+app.UseRouting();
 
+// ✅ CORS must be after routing and before auth
 app.UseCors(FrontendPolicy);
 
-// ✅ Preflight handling: restrict to API + hubs only (NOT all paths)
-// This avoids breaking /swagger/* and any other static endpoints.
+// ✅ Preflight handling for API + hubs
 app.MapMethods("/api/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
    .AllowAnonymous()
    .RequireCors(FrontendPolicy);
@@ -178,18 +184,11 @@ app.MapMethods("/hubs/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
    .AllowAnonymous()
    .RequireCors(FrontendPolicy);
 
-// ✅ Enable Swagger when you want it
-// Option A: enable always (useful while debugging prod):
+// Swagger
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// Option B (alternative): only enable when env var is set
-// if (app.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("EnableSwagger"))
-// {
-//     app.UseSwagger();
-//     app.UseSwaggerUI();
-// }
-
+// Auth
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -202,8 +201,8 @@ app.MapGet("/health", () => Results.Ok(new
     environment = app.Environment.EnvironmentName
 })).AllowAnonymous();
 
+// Endpoints
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();
- 

@@ -7,6 +7,10 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Amazon.S3;
+using Amazon;
+//using Amazon.Extensions.NETCore.Setup;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,6 +41,13 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
+
+// S3 (manual registration; no Extensions package needed)
+builder.Services.AddSingleton<IAmazonS3>(_ =>
+    new AmazonS3Client(RegionEndpoint.EUWest2)
+);
+
+
 
 // ---------- Controllers & SignalR ----------
 builder.Services.AddControllers();
@@ -195,3 +206,4 @@ app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
 
 app.Run();
+ 

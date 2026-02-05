@@ -1,10 +1,9 @@
-//csharp Controllers/AttachmentsController.cs
+using Amazon.S3;
+using Amazon.S3.Model;
 using Chat.Api.Auth;
 using Chat.Api.Data;
 using Chat.Api.Models;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,88 +14,179 @@ namespace Chat.Api.Controllers
     [Authorize]
     public class AttachmentsController : ControllerBase
     {
-        private readonly IWebHostEnvironment _env;
         private readonly ChatDbContext _db;
+        private readonly IAmazonS3 _s3;
+        private readonly IConfiguration _config;
 
-        public AttachmentsController(IWebHostEnvironment env, ChatDbContext db)
+        public AttachmentsController(ChatDbContext db, IAmazonS3 s3, IConfiguration config)
         {
-            _env = env;
             _db = db;
+            _s3 = s3;
+            _config = config;
         }
 
-        // Form model required by Swashbuckle for multipart/form-data
-        public class UploadAttachmentRequest
+        private static readonly HashSet<string> AllowedContentTypes = new(StringComparer.OrdinalIgnoreCase)
         {
-            public IFormFile? File { get; set; }
+            "image/png","image/jpeg","image/gif","image/webp",
+            "video/mp4","video/quicktime","application/pdf"
+        };
+
+        private const long MaxBytes = 20 * 1024 * 1024; // 20 MB
+
+        public class PresignUploadRequest
+        {
+            public string? FileName { get; set; }
+            public string? ContentType { get; set; }
+            public long FileSize { get; set; }
             public Guid? ChatId { get; set; }
         }
 
-        // POST api/attachments
-        // Form: file (IFormFile), optional chatId (Guid) to validate membership
-        [HttpPost]
-        [Consumes("multipart/form-data")]
-        public async Task<ActionResult<object>> Upload([FromForm] UploadAttachmentRequest model)
+        public class PresignUploadResponse
         {
-            var file = model?.File;
-            var chatId = model?.ChatId;
+            public Guid AttachmentId { get; set; }
+            public string Key { get; set; } = default!;
+            public string UploadUrl { get; set; } = default!;
+            public DateTime ExpiresAt { get; set; }
+            public string FileName { get; set; } = default!;
+            public string ContentType { get; set; } = default!;
+        }
 
-            if (file == null || file.Length == 0)
-                return BadRequest("File is required");
+        public class PresignDownloadRequest
+        {
+            public Guid AttachmentId { get; set; }
+            public Guid? ChatId { get; set; }
+        }
 
-            // basic validation: size and content-type whitelist
-            const long maxBytes = 20 * 1024 * 1024; // 20 MB
-            if (file.Length > maxBytes)
+        [HttpPost("presign-upload")]
+        public async Task<ActionResult<PresignUploadResponse>> PresignUpload([FromBody] PresignUploadRequest model)
+        {
+            if (model.ChatId is null)
+                return BadRequest("ChatId is required");
+
+            if (string.IsNullOrWhiteSpace(model.FileName))
+                return BadRequest("FileName is required");
+
+            if (model.FileSize <= 0)
+                return BadRequest("FileSize is required");
+
+            if (model.FileSize > MaxBytes)
                 return BadRequest("File too large");
 
-            var allowed = new[]
-            {
-                "image/png","image/jpeg","image/gif","image/webp",
-                "video/mp4","video/quicktime","application/pdf"
-            };
-            if (!allowed.Contains(file.ContentType))
+            var contentType = string.IsNullOrWhiteSpace(model.ContentType)
+                ? "application/octet-stream"
+                : model.ContentType.Trim();
+
+            if (!AllowedContentTypes.Contains(contentType))
                 return BadRequest("Unsupported file type");
 
             var userId = User.GetUserId();
 
-            if (chatId.HasValue)
+            var isMember = await _db.ChatMembers.AnyAsync(cm => cm.ChatId == model.ChatId && cm.UserId == userId);
+            if (!isMember)
+                return Forbid();
+
+            var bucket = _config["AWS:S3Bucket"];
+            if (string.IsNullOrWhiteSpace(bucket))
+                return StatusCode(500, "AWS:S3Bucket is not configured");
+
+            var safeFileName = Path.GetFileName(model.FileName);
+            var attachmentId = Guid.NewGuid();
+
+            // Keep original name (useful for UX), but still unique.
+            // You can also strip/replace weird chars if you want.
+            var key = $"attachments/{model.ChatId}/{DateTime.UtcNow:yyyy/MM}/{attachmentId:N}-{safeFileName}";
+
+            var expiresAt = DateTime.UtcNow.AddMinutes(10);
+
+            var presignReq = new GetPreSignedUrlRequest
             {
-                var isMember = await _db.ChatMembers.AnyAsync(cm => cm.ChatId == chatId && cm.UserId == userId);
-                if (!isMember)
-                    return Forbid();
-            }
+                BucketName = bucket,
+                Key = key,
+                Verb = HttpVerb.PUT,
+                Expires = expiresAt,
+                ContentType = contentType
+            };
 
-            // Save to wwwroot/uploads for dev. Use blob storage (S3/Azure) in prod.
-            var uploadsRoot = Path.Combine(_env.WebRootPath ?? "wwwroot", "uploads");
-            Directory.CreateDirectory(uploadsRoot);
+            var uploadUrl = _s3.GetPreSignedURL(presignReq);
 
-            var storedFileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
-            var filePath = Path.Combine(uploadsRoot, storedFileName);
-
-            await using (var fs = System.IO.File.Create(filePath))
-            {
-                await file.CopyToAsync(fs);
-            }
-
-            var url = $"{Request.Scheme}://{Request.Host}/uploads/{storedFileName}";
-
+            // Save metadata now (MessageId can be linked later)
             var attachment = new Attachment
             {
-                Id = Guid.NewGuid(),
+                Id = attachmentId,
                 MessageId = null,
-                FileName = file.FileName,
-                ContentType = file.ContentType,
-                Url = url
+                FileName = safeFileName,
+                ContentType = contentType,
+                Url = key // storing S3 key here
             };
 
             _db.Attachments.Add(attachment);
             await _db.SaveChangesAsync();
+
+            return Ok(new PresignUploadResponse
+            {
+                AttachmentId = attachment.Id,
+                Key = key,
+                UploadUrl = uploadUrl,
+                ExpiresAt = expiresAt,
+                FileName = attachment.FileName,
+                ContentType = attachment.ContentType
+            });
+        }
+
+        [HttpPost("presign-download")]
+        public async Task<ActionResult<object>> PresignDownload([FromBody] PresignDownloadRequest model)
+        {
+            if (model.ChatId is null)
+                return BadRequest("ChatId is required");
+
+            var userId = User.GetUserId();
+
+            var isMember = await _db.ChatMembers.AnyAsync(cm => cm.ChatId == model.ChatId && cm.UserId == userId);
+            if (!isMember)
+                return Forbid();
+
+            var attachment = await _db.Attachments.FirstOrDefaultAsync(a => a.Id == model.AttachmentId);
+            if (attachment == null)
+                return NotFound("Attachment not found");
+
+            var bucket = _config["AWS:S3Bucket"];
+            if (string.IsNullOrWhiteSpace(bucket))
+                return StatusCode(500, "AWS:S3Bucket is not configured");
+
+            var key = attachment.Url;
+            if (string.IsNullOrWhiteSpace(key))
+                return StatusCode(500, "Attachment key missing");
+
+            // Optional but recommended: verify object exists before issuing a download URL
+            try
+            {
+                await _s3.GetObjectMetadataAsync(bucket, key);
+            }
+            catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return NotFound("Attachment file not found in storage");
+            }
+
+            var expiresAt = DateTime.UtcNow.AddMinutes(10);
+
+            var presignReq = new GetPreSignedUrlRequest
+            {
+                BucketName = bucket,
+                Key = key,
+                Verb = HttpVerb.GET,
+                Expires = expiresAt
+            };
+
+            var downloadUrl = _s3.GetPreSignedURL(presignReq);
 
             return Ok(new
             {
                 attachment.Id,
                 attachment.FileName,
                 attachment.ContentType,
-                attachment.Url
+                key,
+                downloadUrl,
+                expiresAt
             });
         }
     }

@@ -1,7 +1,6 @@
 ﻿// Program.cs
 using System.Text;
 using Amazon;
-using Amazon.Runtime;
 using Amazon.S3;
 using Chat.Api.Data;
 using Chat.Api.Hubs;
@@ -10,7 +9,6 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -42,14 +40,13 @@ builder.Services.AddCors(options =>
     });
 });
 
-//S3
+// ---------- S3 (FIXED) ----------
+// IMPORTANT:
+// - Do NOT call FallbackCredentialsFactory.GetCredentials() in ECS/Fargate.
+// - Let the AWS SDK automatically use the ECS Task Role credentials.
+// - Ensure your ECS task definition has *taskRoleArn* with S3 permissions.
 builder.Services.AddSingleton<IAmazonS3>(_ =>
 {
-    // ECS/Fargate automatically provides credentials via Task Role
-    // Fallback chain includes Environment, ECS Task Role, Instance profile, etc.
-    var creds = FallbackCredentialsFactory.GetCredentials();
-
-    // Region from ECS env var AWS_REGION or config, fallback eu-west-2
     var regionName =
         Environment.GetEnvironmentVariable("AWS_REGION")
         ?? builder.Configuration["AWS:Region"]
@@ -58,8 +55,10 @@ builder.Services.AddSingleton<IAmazonS3>(_ =>
 
     var region = RegionEndpoint.GetBySystemName(regionName);
 
-    return new AmazonS3Client(creds, region);
+    // Uses default credential chain (ECS task role, env vars, etc.)
+    return new AmazonS3Client(region);
 });
+
 // ---------- Controllers & SignalR ----------
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
@@ -83,8 +82,6 @@ if (string.IsNullOrWhiteSpace(jwtKey) ||
     string.IsNullOrWhiteSpace(jwtIssuer) ||
     string.IsNullOrWhiteSpace(jwtAudience))
 {
-    // Fail fast so you see the real reason in CloudWatch/ECS events,
-    // instead of random 500s during login.
     throw new InvalidOperationException("JWT config missing: Jwt:Key/Issuer/Audience");
 }
 
@@ -100,7 +97,6 @@ builder.Services
         {
             OnMessageReceived = context =>
             {
-                // SignalR token via query string
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
 
@@ -111,7 +107,7 @@ builder.Services
             }
         };
 
-        options.RequireHttpsMetadata = false; // OK behind ALB/CloudFront
+        options.RequireHttpsMetadata = false;
         options.SaveToken = true;
 
         options.TokenValidationParameters = new TokenValidationParameters
@@ -129,7 +125,7 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-// ---------- Swagger --------------
+// ---------- Swagger ----------
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -164,22 +160,17 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// ✅ MUST be early so scheme/host are correct behind ALB/CloudFront
 app.UseForwardedHeaders();
 
-// ✅ CORS ordering
 app.UseRouting();
 app.UseCors(FrontendPolicy);
 
-// ✅ Swagger
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// ✅ Auth
 app.UseAuthentication();
 app.UseAuthorization();
 
-// ✅ Preflight handling (optional, but safe)
 app.MapMethods("/api/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
    .AllowAnonymous()
    .RequireCors(FrontendPolicy);
@@ -188,7 +179,6 @@ app.MapMethods("/hubs/{*path}", new[] { "OPTIONS" }, () => Results.Ok())
    .AllowAnonymous()
    .RequireCors(FrontendPolicy);
 
-// Health check endpoint for ECS/Load Balancer
 app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
@@ -197,7 +187,6 @@ app.MapGet("/health", () => Results.Ok(new
     environment = app.Environment.EnvironmentName
 })).AllowAnonymous();
 
-// Endpoints
 app.MapControllers();
 app.MapHub<ChatHub>("/hubs/chat");
 

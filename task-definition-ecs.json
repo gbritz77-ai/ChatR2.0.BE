@@ -5,6 +5,7 @@
   "cpu": "256",
   "memory": "512",
   "executionRoleArn": "arn:aws:iam::528757805971:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::528757805971:role/chatrTaskRole",
   "containerDefinitions": [
     {
       "name": "chatr-api",
@@ -28,8 +29,11 @@
         {
           "name": "AWS__S3Bucket",
           "value": "outsec-chat-bucket"
+        },
+        {
+          "name": "AWS__Region",
+          "value": "eu-west-2"
         }
-
       ],
       "secrets": [
         {

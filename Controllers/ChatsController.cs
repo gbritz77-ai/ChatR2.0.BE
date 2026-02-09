@@ -30,6 +30,8 @@ namespace Chat.Api.Controllers
         public record CreatePrivateChatRequest(Guid TargetUserId);
         public record CreateGroupChatRequest(string Name, List<Guid> MemberIds);
         public record SendMessageRequest(string? Text, List<Guid>? AttachmentIds = null, string? GifUrl = null);
+        public record AttachmentDto(Guid Id, string FileName, string ContentType, string Url);
+
 
         // Member management DTO
         public record AddMemberRequest(Guid UserId);
@@ -348,27 +350,20 @@ namespace Chat.Api.Controllers
             return NoContent();
         }
 
-        // GET api/chats/{chatId}/messages?skip=0&take=50
         [HttpGet("{chatId:guid}/messages")]
-        public async Task<ActionResult<IEnumerable<object>>> GetMessages(
-            Guid chatId,
-            [FromQuery] int skip = 0,
-            [FromQuery] int take = 50)
+        public async Task<ActionResult<IEnumerable<object>>> GetMessages(Guid chatId, [FromQuery] int skip = 0, [FromQuery] int take = 50)
         {
             var userId = User.GetUserId();
 
-            var isMember = await _db.ChatMembers
-                .AnyAsync(cm => cm.ChatId == chatId && cm.UserId == userId);
-
-            if (!isMember)
-                return Forbid();
+            var isMember = await _db.ChatMembers.AnyAsync(cm => cm.ChatId == chatId && cm.UserId == userId);
+            if (!isMember) return Forbid();
 
             if (take <= 0) take = 50;
             if (take > 200) take = 200;
 
-            var messages = await _db.Messages
+            var msgs = await _db.Messages
                 .Where(m => m.ChatId == chatId)
-                .Include(m => m.Sender) // <-- make sure Message has a Sender nav prop
+                .Include(m => m.Sender)
                 .OrderByDescending(m => m.CreatedAt)
                 .Skip(skip)
                 .Take(take)
@@ -384,10 +379,47 @@ namespace Chat.Api.Controllers
                 })
                 .ToListAsync();
 
-            messages.Reverse(); // oldest first for UI
+            msgs.Reverse(); // oldest first
 
-            return Ok(messages);
+            var messageIds = msgs.Select(m => m.Id).ToList();
+
+            var attachments = await _db.Attachments
+    .Where(a => a.MessageId != null && messageIds.Contains(a.MessageId.Value))
+    .Select(a => new
+    {
+        a.Id,
+        a.MessageId,
+        a.FileName,
+        a.ContentType,
+        a.Url
+    })
+    .ToListAsync();
+
+            var attachmentsByMessage = attachments
+                .GroupBy(a => a.MessageId!.Value)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(x => new AttachmentDto(x.Id, x.FileName, x.ContentType, x.Url)).ToList()
+                );
+
+            var result = msgs.Select(m => new
+            {
+                m.Id,
+                m.ChatId,
+                m.SenderId,
+                m.SenderUserName,
+                m.Text,
+                m.CreatedAt,
+                m.GifUrl,
+                Attachments = attachmentsByMessage.TryGetValue(m.Id, out var list)
+                    ? list
+                    : new List<AttachmentDto>()
+            });
+
+            return Ok(result);
+
         }
+
 
 
         // POST api/chats/{chatId}/read
@@ -463,13 +495,10 @@ namespace Chat.Api.Controllers
                 .Select(u => u.Username)
                 .FirstOrDefaultAsync();
 
-            var attachmentDtos = attached.Select(a => new
-            {
-                a.Id,
-                a.FileName,
-                a.ContentType,
-                a.Url
-            }).ToList();
+            var attachmentDtos = attached
+            .Select(a => new AttachmentDto(a.Id, a.FileName, a.ContentType, a.Url))
+            .ToList();
+
 
             var dto = new
             {

@@ -24,7 +24,12 @@
         {
           "name": "ASPNETCORE_URLS",
           "value": "http://+:8080"
+        },
+        {
+          "name": "AWS__S3Bucket",
+          "value": "outsec-chat-bucket"
         }
+
       ],
       "secrets": [
         {

@@ -136,6 +136,7 @@ namespace Chat.Api.Controllers
                 var attachment = new Attachment
                 {
                     Id = attachmentId,
+                    ChatId = model.ChatId.Value,
                     MessageId = null,
                     FileName = safeFileName,
                     ContentType = contentType,

@@ -1,7 +1,7 @@
 {
   "family": "chatr-task",
   "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [ "FARGATE" ],
   "cpu": "256",
   "memory": "512",
   "executionRoleArn": "arn:aws:iam::528757805971:role/ecsTaskExecutionRole",
@@ -29,11 +29,19 @@
       "secrets": [
         {
           "name": "ConnectionStrings__DefaultConnection",
-          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/db-connection"
+          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/db-connection-SEQcf1"
         },
         {
           "name": "Jwt__Key",
-          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/jwt-key"
+          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/jwt-key-Hg3PKo"
+        },
+        {
+          "name": "Jwt__Issuer",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/jwt-issuer-wCL7M3"
+        },
+        {
+          "name": "Jwt__Audience",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-2:528757805971:secret:chatr/jwt-audience-vC9V7d"
         }
       ],
       "logConfiguration": {

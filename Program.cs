@@ -160,10 +160,16 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Apply any pending EF Core migrations on startup
+// Apply any pending EF Core migrations on startup.
+// The DB was originally created without EF migration tracking, so InitialCreate
+// is not recorded in __EFMigrationsHistory even though the tables already exist.
+// We mark it as applied first so Migrate() only runs the newer migrations.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+    db.Database.ExecuteSqlRaw(
+        "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+        "VALUES ('20260123125355_InitialCreate', '8.0.0')");
     db.Database.Migrate();
 }
 

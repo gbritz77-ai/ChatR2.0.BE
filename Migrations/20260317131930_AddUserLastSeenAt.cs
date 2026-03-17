@@ -11,6 +11,15 @@ namespace ChatR2._0.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Create the replacement composite index FIRST so MySQL still has a
+            // covering index for the ChatMembers.ChatId foreign-key constraint,
+            // then drop the old single-column index safely.
+            migrationBuilder.CreateIndex(
+                name: "IX_ChatMembers_ChatId_UserId",
+                table: "ChatMembers",
+                columns: new[] { "ChatId", "UserId" },
+                unique: true);
+
             migrationBuilder.DropIndex(
                 name: "IX_ChatMembers_ChatId",
                 table: "ChatMembers");
@@ -77,11 +86,6 @@ namespace ChatR2._0.Migrations
                 defaultValue: new Guid("00000000-0000-0000-0000-000000000000"),
                 collation: "ascii_general_ci");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_ChatMembers_ChatId_UserId",
-                table: "ChatMembers",
-                columns: new[] { "ChatId", "UserId" },
-                unique: true);
         }
 
         /// <inheritdoc />

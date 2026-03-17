@@ -18,6 +18,8 @@ namespace Chat.Api.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        public DateTime? LastSeenAt { get; set; }
+
         public ICollection<ChatMember> ChatMembers { get; set; } = new List<ChatMember>();
         public ICollection<Message> Messages { get; set; } = new List<Message>();
     }

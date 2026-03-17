@@ -29,7 +29,7 @@ namespace Chat.Api.Controllers
         // DTOs (nested records) ---------------------------------
         public record CreatePrivateChatRequest(Guid TargetUserId);
         public record CreateGroupChatRequest(string Name, List<Guid> MemberIds);
-        public record SendMessageRequest(string? Text, List<Guid>? AttachmentIds = null, string? GifUrl = null);
+        public record SendMessageRequest(string? Text, List<Guid>? AttachmentIds = null, Guid? AttachmentId = null, string? GifUrl = null);
         public record AttachmentDto(Guid Id, string FileName, string ContentType, string Url);
 
 
@@ -69,6 +69,16 @@ namespace Chat.Api.Controllers
                         .Select(x => x.User!.Username)
                         .FirstOrDefault(),
 
+                    OtherUserId = _db.ChatMembers
+                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
+                        .Select(x => (Guid?)x.UserId)
+                        .FirstOrDefault(),
+
+                    OtherUserLastSeenAt = _db.ChatMembers
+                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
+                        .Select(x => x.User!.LastSeenAt)
+                        .FirstOrDefault(),
+
                     // ✅ FIX: don't count your own messages as unread
                     UnreadCount = _db.Messages.Count(m =>
                         m.ChatId == cm.ChatId &&
@@ -84,7 +94,9 @@ namespace Chat.Api.Controllers
                 name = i.IsGroup
                     ? (i.ChatName ?? "Group chat")
                     : (i.OtherUserName ?? "Direct chat"),
-                unreadCount = i.UnreadCount
+                unreadCount = i.UnreadCount,
+                otherUserId = i.OtherUserId,
+                otherUserLastSeenAt = i.OtherUserLastSeenAt
             });
 
             return Ok(result);

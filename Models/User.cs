@@ -29,6 +29,8 @@ namespace Chat.Api.Models
         [MaxLength(10)]
         public string? AvailabilityTo { get; set; }     // e.g. "17:00"
 
+        public bool MustChangePassword { get; set; } = false;
+
         public ICollection<ChatMember> ChatMembers { get; set; } = new List<ChatMember>();
         public ICollection<Message> Messages { get; set; } = new List<Message>();
     }

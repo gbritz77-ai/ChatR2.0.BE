@@ -4,6 +4,8 @@ using Amazon;
 using Amazon.S3;
 using Chat.Api.Data;
 using Chat.Api.Hubs;
+using Chat.Api.Models;
+using Chat.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -58,6 +60,9 @@ builder.Services.AddSingleton<IAmazonS3>(_ =>
     // Uses default credential chain (ECS task role, env vars, etc.)
     return new AmazonS3Client(region);
 });
+
+// ---------- Email service ----------
+builder.Services.AddSingleton<IEmailService, EmailService>();
 
 // ---------- Controllers & SignalR ----------
 builder.Services.AddControllers();
@@ -203,7 +208,35 @@ using (var scope = app.Services.CreateScope())
     AddColumnIfMissing("AvailabilityDays", "AvailabilityDays varchar(50) NULL");
     AddColumnIfMissing("AvailabilityFrom", "AvailabilityFrom varchar(10) NULL");
     AddColumnIfMissing("AvailabilityTo",   "AvailabilityTo varchar(10) NULL");
+
+    // AddMustChangePassword migration
+    db.Database.ExecuteSqlRaw(
+        "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+        "VALUES ('20260318090000_AddMustChangePassword', '8.0.0')");
+    AddColumnIfMissing("MustChangePassword", "MustChangePassword tinyint(1) NOT NULL DEFAULT 0");
+
     conn.Close();
+
+    // Seed Master user if none exists
+    var masterSection = app.Configuration.GetSection("MasterUser");
+    var masterUsername = masterSection["Username"] ?? "master";
+    var masterEmail    = masterSection["Email"]    ?? "master@imptrack.co.za";
+    var masterPassword = masterSection["Password"] ?? "ImpTrack@Master2025";
+
+    var masterExists = db.Users.Any(u => u.Role == UserRole.Master);
+    if (!masterExists)
+    {
+        db.Users.Add(new User
+        {
+            Id           = Guid.NewGuid(),
+            Username     = masterUsername,
+            Email        = masterEmail,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(masterPassword),
+            Role         = UserRole.Master,
+            MustChangePassword = false
+        });
+        db.SaveChanges();
+    }
 }
 
 app.UseForwardedHeaders();

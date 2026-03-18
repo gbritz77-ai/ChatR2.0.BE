@@ -1,4 +1,5 @@
 ﻿using BCrypt.Net;
+using Chat.Api.Auth;
 using Chat.Api.Data;
 using Chat.Api.DTOs.Auth;
 using Chat.Api.Models;
@@ -88,7 +89,8 @@ namespace Chat.Api.Controllers
                 Token = token!,
                 ExpiresAt = expiresAt,
                 Username = user.Username,
-                Role = user.Role.ToString()
+                Role = user.Role.ToString(),
+                MustChangePassword = user.MustChangePassword
             };
         }
 
@@ -109,6 +111,27 @@ namespace Chat.Api.Controllers
                 Username = username,
                 Role = role
             });
+        }
+
+        [Authorize]
+        [HttpPost("change-password")]
+        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
+                return BadRequest("New password must be at least 8 characters.");
+
+            var userId = User.GetUserId();
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return NotFound();
+
+            if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash))
+                return Unauthorized("Current password is incorrect.");
+
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            user.MustChangePassword = false;
+            await _db.SaveChangesAsync();
+
+            return NoContent();
         }
 
         private bool TryGenerateJwt(User user, out string? token, out DateTime expiresAt, out string? error)

@@ -167,10 +167,26 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+
+    // Stamp InitialCreate as applied so Migrate() skips it (DB predates EF tracking)
     db.Database.ExecuteSqlRaw(
         "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
         "VALUES ('20260123125355_InitialCreate', '8.0.0')");
+
     db.Database.Migrate();
+
+    // AddUserAvailability: multi-statement PREPARE/EXECUTE doesn't run reliably inside
+    // migrationBuilder.Sql(), so we apply the column additions directly here using
+    // MySQL 8 "IF NOT EXISTS" syntax, which is always safe to re-run.
+    db.Database.ExecuteSqlRaw(
+        "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+        "VALUES ('20260318080000_AddUserAvailability', '8.0.0')");
+    db.Database.ExecuteSqlRaw(
+        "ALTER TABLE Users ADD COLUMN IF NOT EXISTS AvailabilityDays varchar(50) NULL");
+    db.Database.ExecuteSqlRaw(
+        "ALTER TABLE Users ADD COLUMN IF NOT EXISTS AvailabilityFrom varchar(10) NULL");
+    db.Database.ExecuteSqlRaw(
+        "ALTER TABLE Users ADD COLUMN IF NOT EXISTS AvailabilityTo varchar(10) NULL");
 }
 
 app.UseForwardedHeaders();

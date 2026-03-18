@@ -175,18 +175,35 @@ using (var scope = app.Services.CreateScope())
 
     db.Database.Migrate();
 
-    // AddUserAvailability: multi-statement PREPARE/EXECUTE doesn't run reliably inside
-    // migrationBuilder.Sql(), so we apply the column additions directly here using
-    // MySQL 8 "IF NOT EXISTS" syntax, which is always safe to re-run.
+    // AddUserAvailability: stamp the migration as applied and add columns via raw
+    // ADO.NET so we can check INFORMATION_SCHEMA first (IF NOT EXISTS not supported
+    // on this MySQL version; migrationBuilder.Sql multi-statements also unreliable).
     db.Database.ExecuteSqlRaw(
         "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
         "VALUES ('20260318080000_AddUserAvailability', '8.0.0')");
-    db.Database.ExecuteSqlRaw(
-        "ALTER TABLE Users ADD COLUMN IF NOT EXISTS AvailabilityDays varchar(50) NULL");
-    db.Database.ExecuteSqlRaw(
-        "ALTER TABLE Users ADD COLUMN IF NOT EXISTS AvailabilityFrom varchar(10) NULL");
-    db.Database.ExecuteSqlRaw(
-        "ALTER TABLE Users ADD COLUMN IF NOT EXISTS AvailabilityTo varchar(10) NULL");
+
+    var conn = db.Database.GetDbConnection();
+    conn.Open();
+    void AddColumnIfMissing(string column, string definition)
+    {
+        using var check = conn.CreateCommand();
+        check.CommandText =
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Users' AND COLUMN_NAME = @col";
+        var p = check.CreateParameter(); p.ParameterName = "@col"; p.Value = column;
+        check.Parameters.Add(p);
+        var exists = Convert.ToInt64(check.ExecuteScalar()) > 0;
+        if (!exists)
+        {
+            using var alter = conn.CreateCommand();
+            alter.CommandText = $"ALTER TABLE Users ADD COLUMN {definition}";
+            alter.ExecuteNonQuery();
+        }
+    }
+    AddColumnIfMissing("AvailabilityDays", "AvailabilityDays varchar(50) NULL");
+    AddColumnIfMissing("AvailabilityFrom", "AvailabilityFrom varchar(10) NULL");
+    AddColumnIfMissing("AvailabilityTo",   "AvailabilityTo varchar(10) NULL");
+    conn.Close();
 }
 
 app.UseForwardedHeaders();

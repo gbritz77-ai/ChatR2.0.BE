@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -11,81 +11,101 @@ namespace ChatR2._0.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Create the replacement composite index FIRST so MySQL still has a
-            // covering index for the ChatMembers.ChatId foreign-key constraint,
-            // then drop the old single-column index safely.
-            migrationBuilder.CreateIndex(
-                name: "IX_ChatMembers_ChatId_UserId",
-                table: "ChatMembers",
-                columns: new[] { "ChatId", "UserId" },
-                unique: true);
+            // All steps are written as idempotent raw SQL because this migration
+            // was partially applied across multiple crash-restart cycles and the
+            // DB schema is in an unknown intermediate state.
 
-            migrationBuilder.DropIndex(
-                name: "IX_ChatMembers_ChatId",
-                table: "ChatMembers");
+            // 1. Create composite unique index (if not already there)
+            migrationBuilder.Sql(@"
+                SET @db = DATABASE();
+                SET @exists = (
+                    SELECT COUNT(*) FROM information_schema.statistics
+                    WHERE table_schema = @db
+                      AND table_name   = 'ChatMembers'
+                      AND index_name   = 'IX_ChatMembers_ChatId_UserId'
+                );
+                SET @sql = IF(@exists = 0,
+                    'CREATE UNIQUE INDEX IX_ChatMembers_ChatId_UserId ON ChatMembers (ChatId, UserId)',
+                    'SELECT 1');
+                PREPARE stmt FROM @sql;
+                EXECUTE stmt;
+                DEALLOCATE PREPARE stmt;
+            ");
 
-            migrationBuilder.AlterColumn<DateTime>(
-                name: "CreatedAt",
-                table: "Users",
-                type: "datetime",
-                nullable: false,
-                oldClrType: typeof(DateTime),
-                oldType: "datetime(6)");
+            // 2. Drop old single-column index (only if still present)
+            migrationBuilder.Sql(@"
+                SET @db = DATABASE();
+                SET @exists = (
+                    SELECT COUNT(*) FROM information_schema.statistics
+                    WHERE table_schema = @db
+                      AND table_name   = 'ChatMembers'
+                      AND index_name   = 'IX_ChatMembers_ChatId'
+                );
+                SET @sql = IF(@exists > 0,
+                    'DROP INDEX IX_ChatMembers_ChatId ON ChatMembers',
+                    'SELECT 1');
+                PREPARE stmt FROM @sql;
+                EXECUTE stmt;
+                DEALLOCATE PREPARE stmt;
+            ");
 
-            migrationBuilder.AddColumn<DateTime>(
-                name: "LastSeenAt",
-                table: "Users",
-                type: "datetime",
-                nullable: true);
+            // 3. Add LastSeenAt to Users (if missing)
+            migrationBuilder.Sql(@"
+                SET @db = DATABASE();
+                SET @exists = (
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = @db
+                      AND table_name   = 'Users'
+                      AND column_name  = 'LastSeenAt'
+                );
+                SET @sql = IF(@exists = 0,
+                    'ALTER TABLE Users ADD COLUMN LastSeenAt datetime NULL',
+                    'SELECT 1');
+                PREPARE stmt FROM @sql;
+                EXECUTE stmt;
+                DEALLOCATE PREPARE stmt;
+            ");
 
-            migrationBuilder.AlterColumn<DateTime>(
-                name: "CreatedAt",
-                table: "Messages",
-                type: "datetime",
-                nullable: false,
-                oldClrType: typeof(DateTime),
-                oldType: "datetime(6)");
+            // 4. Add PrivateKey to Chats (if missing)
+            migrationBuilder.Sql(@"
+                SET @db = DATABASE();
+                SET @exists = (
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = @db
+                      AND table_name   = 'Chats'
+                      AND column_name  = 'PrivateKey'
+                );
+                SET @sql = IF(@exists = 0,
+                    'ALTER TABLE Chats ADD COLUMN PrivateKey longtext CHARACTER SET utf8mb4 NULL',
+                    'SELECT 1');
+                PREPARE stmt FROM @sql;
+                EXECUTE stmt;
+                DEALLOCATE PREPARE stmt;
+            ");
 
-            migrationBuilder.AlterColumn<DateTime>(
-                name: "CreatedAt",
-                table: "Chats",
-                type: "datetime",
-                nullable: false,
-                oldClrType: typeof(DateTime),
-                oldType: "datetime(6)");
+            // 5. Add ChatId to Attachments (if missing)
+            migrationBuilder.Sql(@"
+                SET @db = DATABASE();
+                SET @exists = (
+                    SELECT COUNT(*) FROM information_schema.columns
+                    WHERE table_schema = @db
+                      AND table_name   = 'Attachments'
+                      AND column_name  = 'ChatId'
+                );
+                SET @sql = IF(@exists = 0,
+                    'ALTER TABLE Attachments ADD COLUMN ChatId char(36) CHARACTER SET ascii NOT NULL DEFAULT (UUID())',
+                    'SELECT 1');
+                PREPARE stmt FROM @sql;
+                EXECUTE stmt;
+                DEALLOCATE PREPARE stmt;
+            ");
 
-            migrationBuilder.AddColumn<string>(
-                name: "PrivateKey",
-                table: "Chats",
-                type: "longtext",
-                nullable: true)
-                .Annotation("MySql:CharSet", "utf8mb4");
-
-            migrationBuilder.AlterColumn<DateTime>(
-                name: "LastReadAt",
-                table: "ChatMembers",
-                type: "datetime",
-                nullable: true,
-                oldClrType: typeof(DateTime),
-                oldType: "datetime(6)",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<DateTime>(
-                name: "JoinedAt",
-                table: "ChatMembers",
-                type: "datetime",
-                nullable: false,
-                oldClrType: typeof(DateTime),
-                oldType: "datetime(6)");
-
-            migrationBuilder.AddColumn<Guid>(
-                name: "ChatId",
-                table: "Attachments",
-                type: "char(36)",
-                nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"),
-                collation: "ascii_general_ci");
-
+            // 6. Normalise datetime precision (datetime(6) → datetime) – safe to re-run
+            migrationBuilder.Sql("ALTER TABLE Users    MODIFY CreatedAt  datetime NOT NULL");
+            migrationBuilder.Sql("ALTER TABLE Messages MODIFY CreatedAt  datetime NOT NULL");
+            migrationBuilder.Sql("ALTER TABLE Chats    MODIFY CreatedAt  datetime NOT NULL");
+            migrationBuilder.Sql("ALTER TABLE ChatMembers MODIFY JoinedAt   datetime NOT NULL");
+            migrationBuilder.Sql("ALTER TABLE ChatMembers MODIFY LastReadAt datetime NULL");
         }
 
         /// <inheritdoc />

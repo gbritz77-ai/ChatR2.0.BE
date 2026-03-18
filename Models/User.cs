@@ -20,6 +20,15 @@ namespace Chat.Api.Models
 
         public DateTime? LastSeenAt { get; set; }
 
+        [MaxLength(50)]
+        public string? AvailabilityDays { get; set; }   // e.g. "Mon,Tue,Wed,Thu,Fri"
+
+        [MaxLength(10)]
+        public string? AvailabilityFrom { get; set; }   // e.g. "09:00"
+
+        [MaxLength(10)]
+        public string? AvailabilityTo { get; set; }     // e.g. "17:00"
+
         public ICollection<ChatMember> ChatMembers { get; set; } = new List<ChatMember>();
         public ICollection<Message> Messages { get; set; } = new List<Message>();
     }

@@ -79,6 +79,21 @@ namespace Chat.Api.Controllers
                         .Select(x => x.User!.LastSeenAt)
                         .FirstOrDefault(),
 
+                    OtherUserAvailabilityDays = _db.ChatMembers
+                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
+                        .Select(x => x.User!.AvailabilityDays)
+                        .FirstOrDefault(),
+
+                    OtherUserAvailabilityFrom = _db.ChatMembers
+                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
+                        .Select(x => x.User!.AvailabilityFrom)
+                        .FirstOrDefault(),
+
+                    OtherUserAvailabilityTo = _db.ChatMembers
+                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
+                        .Select(x => x.User!.AvailabilityTo)
+                        .FirstOrDefault(),
+
                     // ✅ FIX: don't count your own messages as unread
                     UnreadCount = _db.Messages.Count(m =>
                         m.ChatId == cm.ChatId &&
@@ -96,7 +111,10 @@ namespace Chat.Api.Controllers
                     : (i.OtherUserName ?? "Direct chat"),
                 unreadCount = i.UnreadCount,
                 otherUserId = i.OtherUserId,
-                otherUserLastSeenAt = i.OtherUserLastSeenAt
+                otherUserLastSeenAt = i.OtherUserLastSeenAt,
+                otherUserAvailabilityDays = i.OtherUserAvailabilityDays,
+                otherUserAvailabilityFrom = i.OtherUserAvailabilityFrom,
+                otherUserAvailabilityTo   = i.OtherUserAvailabilityTo,
             });
 
             return Ok(result);

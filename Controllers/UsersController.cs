@@ -31,8 +31,11 @@ namespace Chat.Api.Controllers
                     u.Id,
                     u.Username,
                     u.Email,
-                    Role = u.Role.ToString(), // enum -> "Admin"/"Staff"
-                    u.CreatedAt
+                    Role = u.Role.ToString(),
+                    u.CreatedAt,
+                    u.AvailabilityDays,
+                    u.AvailabilityFrom,
+                    u.AvailabilityTo
                 })
                 .FirstOrDefaultAsync();
 
@@ -73,6 +76,23 @@ namespace Chat.Api.Controllers
                 .ToListAsync();
 
             return Ok(users);
+        }
+
+        public record UpdateAvailabilityRequest(string? Days, string? From, string? To);
+
+        [HttpPut("me/availability")]
+        public async Task<IActionResult> UpdateAvailability([FromBody] UpdateAvailabilityRequest request)
+        {
+            var userId = User.GetUserId();
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return NotFound();
+
+            user.AvailabilityDays = string.IsNullOrWhiteSpace(request.Days) ? null : request.Days.Trim();
+            user.AvailabilityFrom = string.IsNullOrWhiteSpace(request.From) ? null : request.From.Trim();
+            user.AvailabilityTo   = string.IsNullOrWhiteSpace(request.To)   ? null : request.To.Trim();
+
+            await _db.SaveChangesAsync();
+            return NoContent();
         }
 
     }

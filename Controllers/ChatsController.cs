@@ -60,6 +60,7 @@ namespace Chat.Api.Controllers
                     cm.ChatId,
                     cm.Chat!.IsGroup,
                     ChatName = cm.Chat.Name,
+                    CreatedByUserId = cm.Chat.CreatedByUserId,
                     cm.IsAdmin,
                     cm.JoinedAt,
                     cm.LastReadAt,
@@ -110,6 +111,7 @@ namespace Chat.Api.Controllers
                     ? (i.ChatName ?? "Group chat")
                     : (i.OtherUserName ?? "Direct chat"),
                 unreadCount = i.UnreadCount,
+                createdByUserId = i.CreatedByUserId,
                 otherUserId = i.OtherUserId,
                 otherUserLastSeenAt = i.OtherUserLastSeenAt,
                 otherUserAvailabilityDays = i.OtherUserAvailabilityDays,

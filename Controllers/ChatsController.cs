@@ -95,6 +95,11 @@ namespace Chat.Api.Controllers
                         .Select(x => x.User!.AvailabilityTo)
                         .FirstOrDefault(),
 
+                    OtherUserHasAvatar = _db.ChatMembers
+                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
+                        .Select(x => x.User!.AvatarKey != null)
+                        .FirstOrDefault(),
+
                     // ✅ FIX: don't count your own messages as unread
                     UnreadCount = _db.Messages.Count(m =>
                         m.ChatId == cm.ChatId &&
@@ -117,6 +122,7 @@ namespace Chat.Api.Controllers
                 otherUserAvailabilityDays = i.OtherUserAvailabilityDays,
                 otherUserAvailabilityFrom = i.OtherUserAvailabilityFrom,
                 otherUserAvailabilityTo   = i.OtherUserAvailabilityTo,
+                otherUserHasAvatar        = i.OtherUserHasAvatar,
             });
 
             return Ok(result);

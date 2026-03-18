@@ -86,6 +86,7 @@ namespace Chat.Api.Controllers
 
             return new LoginResponse
             {
+                UserId = user.Id,
                 Token = token!,
                 ExpiresAt = expiresAt,
                 Username = user.Username,

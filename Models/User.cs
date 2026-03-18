@@ -31,6 +31,9 @@ namespace Chat.Api.Models
 
         public bool MustChangePassword { get; set; } = false;
 
+        [MaxLength(500)]
+        public string? AvatarKey { get; set; }
+
         public ICollection<ChatMember> ChatMembers { get; set; } = new List<ChatMember>();
         public ICollection<Message> Messages { get; set; } = new List<Message>();
     }

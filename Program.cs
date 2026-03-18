@@ -215,6 +215,12 @@ using (var scope = app.Services.CreateScope())
         "VALUES ('20260318090000_AddMustChangePassword', '8.0.0')");
     AddColumnIfMissing("MustChangePassword", "MustChangePassword tinyint(1) NOT NULL DEFAULT 0");
 
+    // AddAvatarKey migration
+    db.Database.ExecuteSqlRaw(
+        "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+        "VALUES ('20260318110000_AddAvatarKey', '8.0.0')");
+    AddColumnIfMissing("AvatarKey", "AvatarKey varchar(500) NULL");
+
     conn.Close();
 
     // Seed Master user if none exists

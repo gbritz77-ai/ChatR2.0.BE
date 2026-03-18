@@ -1,3 +1,5 @@
+using Amazon.S3;
+using Amazon.S3.Model;
 using Chat.Api.Auth;
 using Chat.Api.Data;
 using Chat.Api.DTOs.Auth;
@@ -17,13 +19,18 @@ namespace Chat.Api.Controllers
         private readonly ChatDbContext _db;
         private readonly IEmailService _email;
         private readonly IConfiguration _config;
+        private readonly IAmazonS3 _s3;
 
-        public UsersController(ChatDbContext db, IEmailService email, IConfiguration config)
+        public UsersController(ChatDbContext db, IEmailService email, IConfiguration config, IAmazonS3 s3)
         {
             _db = db;
             _email = email;
             _config = config;
+            _s3 = s3;
         }
+
+        private string? GetBucketName() =>
+            _config["AWS:S3Bucket"] ?? _config["AWS__S3Bucket"];
 
         // GET api/users/me
         [HttpGet("me")]
@@ -42,7 +49,8 @@ namespace Chat.Api.Controllers
                     u.CreatedAt,
                     u.AvailabilityDays,
                     u.AvailabilityFrom,
-                    u.AvailabilityTo
+                    u.AvailabilityTo,
+                    HasAvatar = u.AvatarKey != null
                 })
                 .FirstOrDefaultAsync();
 
@@ -99,6 +107,84 @@ namespace Chat.Api.Controllers
             await _db.SaveChangesAsync();
             return NoContent();
         }
+
+        // ── Avatar endpoints ─────────────────────────────────────────────────
+
+        // GET api/users/me/avatar-upload-url?contentType=image/jpeg
+        [HttpGet("me/avatar-upload-url")]
+        public ActionResult<object> GetAvatarUploadUrl([FromQuery] string contentType = "image/jpeg")
+        {
+            var userId = User.GetUserId();
+
+            var bucket = GetBucketName();
+            if (string.IsNullOrWhiteSpace(bucket))
+                return StatusCode(500, "S3 bucket not configured (AWS:S3Bucket)");
+
+            var key = $"avatars/{userId}";
+            var expiresAt = DateTime.UtcNow.AddMinutes(10);
+
+            var presignReq = new GetPreSignedUrlRequest
+            {
+                BucketName = bucket,
+                Key = key,
+                Verb = HttpVerb.PUT,
+                Expires = expiresAt,
+                ContentType = contentType
+            };
+
+            var uploadUrl = _s3.GetPreSignedURL(presignReq);
+
+            return Ok(new { uploadUrl, key, expiresAt });
+        }
+
+        public record ConfirmAvatarRequest(string Key);
+
+        // POST api/users/me/avatar — saves the S3 key after a successful upload
+        [HttpPost("me/avatar")]
+        public async Task<IActionResult> ConfirmAvatar([FromBody] ConfirmAvatarRequest request)
+        {
+            var userId = User.GetUserId();
+            var user = await _db.Users.FindAsync(userId);
+            if (user == null) return NotFound();
+
+            user.AvatarKey = request.Key;
+            await _db.SaveChangesAsync();
+
+            return Ok(new { avatarKey = user.AvatarKey });
+        }
+
+        // GET api/users/{userId}/avatar-url — returns a presigned GET URL (1 hr TTL)
+        [HttpGet("{userId:guid}/avatar-url")]
+        public async Task<ActionResult<object>> GetAvatarUrl(Guid userId)
+        {
+            var user = await _db.Users
+                .Where(u => u.Id == userId)
+                .Select(u => new { u.AvatarKey })
+                .FirstOrDefaultAsync();
+
+            if (user == null || string.IsNullOrWhiteSpace(user.AvatarKey))
+                return NotFound();
+
+            var bucket = GetBucketName();
+            if (string.IsNullOrWhiteSpace(bucket))
+                return StatusCode(500, "S3 bucket not configured (AWS:S3Bucket)");
+
+            var expiresAt = DateTime.UtcNow.AddHours(1);
+
+            var presignReq = new GetPreSignedUrlRequest
+            {
+                BucketName = bucket,
+                Key = user.AvatarKey,
+                Verb = HttpVerb.GET,
+                Expires = expiresAt
+            };
+
+            var url = _s3.GetPreSignedURL(presignReq);
+
+            return Ok(new { url, expiresAt });
+        }
+
+        // ── Invite endpoint ──────────────────────────────────────────────────
 
         // POST api/users/invite — Master only
         [HttpPost("invite")]

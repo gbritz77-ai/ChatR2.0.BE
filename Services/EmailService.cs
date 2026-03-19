@@ -45,7 +45,7 @@ To get started, visit: {appUrl}
 
 Your login credentials:
   Username: {username}
-  Temporary password: ImpTrack@2020
+  Temporary password: Outsec@2026
 
 You will be prompted to change your password when you first log in.
 

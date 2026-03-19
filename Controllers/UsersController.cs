@@ -199,7 +199,7 @@ namespace Chat.Api.Controllers
             var username = request.Username.Trim();
             var email = request.Email.Trim();
 
-            const string defaultPassword = "ImpTrack@2020";
+            const string defaultPassword = "Outsec@2026";
 
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == username || u.Email == email);
             if (user == null)

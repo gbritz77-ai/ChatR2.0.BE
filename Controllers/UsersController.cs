@@ -20,13 +20,15 @@ namespace Chat.Api.Controllers
         private readonly IEmailService _email;
         private readonly IConfiguration _config;
         private readonly IAmazonS3 _s3;
+        private readonly ILogger<UsersController> _logger;
 
-        public UsersController(ChatDbContext db, IEmailService email, IConfiguration config, IAmazonS3 s3)
+        public UsersController(ChatDbContext db, IEmailService email, IConfiguration config, IAmazonS3 s3, ILogger<UsersController> logger)
         {
             _db = db;
             _email = email;
             _config = config;
             _s3 = s3;
+            _logger = logger;
         }
 
         private string? GetBucketName() =>
@@ -223,6 +225,7 @@ namespace Chat.Api.Controllers
             catch (Exception ex)
             {
                 // Don't fail the invite if email sending fails — user was created
+                _logger.LogError(ex, "[Invite] SMTP failed for {Email}: {Message}", email, ex.Message);
                 return Ok(new { message = $"User invited but email could not be sent: {ex.Message}" });
             }
 

@@ -50,7 +50,7 @@ Your login credentials:
 You will be prompted to change your password when you first log in.
 
 Regards,
-The ImpTrack Team"
+Outsec Team"
             };
 
             // Port 465 = implicit SSL (SslOnConnect), port 587 = STARTTLS (StartTls)

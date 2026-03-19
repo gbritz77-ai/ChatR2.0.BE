@@ -1,5 +1,6 @@
-using System.Net;
-using System.Net.Mail;
+using MailKit.Net.Smtp;
+using MailKit.Security;
+using MimeKit;
 
 namespace Chat.Api.Services
 {
@@ -21,7 +22,7 @@ namespace Chat.Api.Services
             var port = int.Parse(smtp["Port"] ?? "587");
             var smtpUser = smtp["Username"];
             var smtpPass = smtp["Password"];
-            var fromName = smtp["FromName"] ?? "ImpTrack";
+            var fromName = smtp["FromName"] ?? "ChatR";
             var fromEmail = smtp["FromEmail"] ?? smtpUser ?? "noreply@imptrack.co.za";
 
             if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))
@@ -30,8 +31,13 @@ namespace Chat.Api.Services
                 return;
             }
 
-            var subject = "You've been invited to ImpTrack Chat";
-            var body = $@"Hi {username},
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress(fromName, fromEmail));
+            message.To.Add(new MailboxAddress(username, toEmail));
+            message.Subject = "You've been invited to ImpTrack Chat";
+            message.Body = new TextPart("plain")
+            {
+                Text = $@"Hi {username},
 
 You have been invited to ImpTrack Chat.
 
@@ -44,34 +50,19 @@ Your login credentials:
 You will be prompted to change your password when you first log in.
 
 Regards,
-The ImpTrack Team";
-
-            using var client = new SmtpClient(host, port)
-            {
-                Credentials = new NetworkCredential(smtpUser, smtpPass),
-                EnableSsl = true
+The ImpTrack Team"
             };
 
-            var message = new MailMessage(
-                from: new MailAddress(fromEmail, fromName),
-                to: new MailAddress(toEmail)
-            )
-            {
-                Subject = subject,
-                Body = body,
-                IsBodyHtml = false
-            };
+            // Port 465 = implicit SSL (SslOnConnect), port 587 = STARTTLS (StartTls)
+            var socketOptions = port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
 
-            try
-            {
-                await client.SendMailAsync(message);
-                _logger.LogInformation("[EmailService] Invite sent to {Email}", toEmail);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[EmailService] Failed to send invite to {Email}", toEmail);
-                throw;
-            }
+            using var client = new SmtpClient();
+            await client.ConnectAsync(host, port, socketOptions);
+            await client.AuthenticateAsync(smtpUser, smtpPass);
+            await client.SendAsync(message);
+            await client.DisconnectAsync(true);
+
+            _logger.LogInformation("[EmailService] Invite sent to {Email}", toEmail);
         }
     }
 }

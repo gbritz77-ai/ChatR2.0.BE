@@ -197,24 +197,23 @@ namespace Chat.Api.Controllers
             var username = request.Username.Trim();
             var email = request.Email.Trim();
 
-            var exists = await _db.Users.AnyAsync(u => u.Username == username || u.Email == email);
-            if (exists)
-                return Conflict("Username or email already exists.");
-
             const string defaultPassword = "ImpTrack@2020";
 
-            var user = new User
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Username == username || u.Email == email);
+            if (user == null)
             {
-                Id = Guid.NewGuid(),
-                Username = username,
-                Email = email,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(defaultPassword),
-                Role = UserRole.Staff,
-                MustChangePassword = true
-            };
-
-            _db.Users.Add(user);
-            await _db.SaveChangesAsync();
+                user = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Username = username,
+                    Email = email,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(defaultPassword),
+                    Role = UserRole.Staff,
+                    MustChangePassword = true
+                };
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync();
+            }
 
             var appUrl = _config["AppUrl"] ?? "https://main.d1imfsef8qotjc.amplifyapp.com";
             try

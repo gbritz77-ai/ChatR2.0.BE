@@ -57,6 +57,8 @@ The ImpTrack Team"
             var socketOptions = port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
 
             using var client = new SmtpClient();
+            // Accept self-signed or untrusted certs on private mail servers
+            client.ServerCertificateValidationCallback = (s, c, h, e) => true;
             await client.ConnectAsync(host, port, socketOptions);
             await client.AuthenticateAsync(smtpUser, smtpPass);
             await client.SendAsync(message);

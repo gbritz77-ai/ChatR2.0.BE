@@ -615,5 +615,26 @@ namespace Chat.Api.Controllers
 
         public record EditMessageRequest(string Text);
 
+        // DELETE api/chats/{chatId}/messages/{messageId}
+        [HttpDelete("{chatId:guid}/messages/{messageId:guid}")]
+        public async Task<IActionResult> DeleteMessage(Guid chatId, Guid messageId)
+        {
+            var userId = User.GetUserId();
+
+            var message = await _db.Messages
+                .FirstOrDefaultAsync(m => m.Id == messageId && m.ChatId == chatId);
+
+            if (message == null) return NotFound();
+            if (message.SenderId != userId) return Forbid();
+
+            _db.Messages.Remove(message);
+            await _db.SaveChangesAsync();
+
+            await _chatHub.Clients.Group(chatId.ToString())
+                .SendAsync("MessageDeleted", new { messageId, chatId });
+
+            return NoContent();
+        }
+
     }
 }

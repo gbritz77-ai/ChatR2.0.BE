@@ -20,5 +20,8 @@
         public ICollection<Message> Messages { get; set; } = new List<Message>();
         public string? PrivateKey { get; set; } // null for groups
 
+        [System.ComponentModel.DataAnnotations.MaxLength(500)]
+        public string? AvatarKey { get; set; }
+
     }
 }

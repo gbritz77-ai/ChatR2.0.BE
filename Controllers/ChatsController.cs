@@ -1,4 +1,6 @@
-﻿using Chat.Api.Auth;
+﻿using Amazon.S3;
+using Amazon.S3.Model;
+using Chat.Api.Auth;
 using Chat.Api.Data;
 using Chat.Api.Hubs;
 using Chat.Api.Models;
@@ -19,16 +21,37 @@ namespace Chat.Api.Controllers
     {
         private readonly ChatDbContext _db;
         private readonly IHubContext<ChatHub> _chatHub;
+        private readonly IAmazonS3 _s3;
+        private readonly IConfiguration _config;
 
-        public ChatsController(ChatDbContext db, IHubContext<ChatHub> chatHub)
+        public ChatsController(ChatDbContext db, IHubContext<ChatHub> chatHub, IAmazonS3 s3, IConfiguration config)
         {
             _db = db;
             _chatHub = chatHub;
+            _s3 = s3;
+            _config = config;
+        }
+
+        private string? GetBucketName() =>
+            _config["AWS:S3Bucket"] ?? _config["AWS__S3Bucket"];
+
+        private string? GetPresignedGetUrl(string? key)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return null;
+            var bucket = GetBucketName();
+            if (string.IsNullOrWhiteSpace(bucket)) return null;
+            return _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            {
+                BucketName = bucket,
+                Key = key,
+                Verb = HttpVerb.GET,
+                Expires = DateTime.UtcNow.AddHours(1)
+            });
         }
 
         // DTOs (nested records) ---------------------------------
         public record CreatePrivateChatRequest(Guid TargetUserId);
-        public record CreateGroupChatRequest(string Name, List<Guid> MemberIds);
+        public record CreateGroupChatRequest(string Name, List<Guid> MemberIds, string? AvatarKey = null);
         public record SendMessageRequest(string? Text, List<Guid>? AttachmentIds = null, Guid? AttachmentId = null, string? GifUrl = null);
         public record AttachmentDto(Guid Id, string FileName, string ContentType, string Url);
 
@@ -105,6 +128,8 @@ namespace Chat.Api.Controllers
                         .Select(x => x.User!.Group)
                         .FirstOrDefault(),
 
+                    ChatAvatarKey = cm.Chat!.AvatarKey,
+
                     // ✅ FIX: don't count your own messages as unread
                     UnreadCount = _db.Messages.Count(m =>
                         m.ChatId == cm.ChatId &&
@@ -129,6 +154,7 @@ namespace Chat.Api.Controllers
                 otherUserAvailabilityTo   = i.OtherUserAvailabilityTo,
                 otherUserHasAvatar        = i.OtherUserHasAvatar,
                 otherUserGroup            = i.OtherUserGroup,
+                chatAvatarUrl             = GetPresignedGetUrl(i.ChatAvatarKey),
             });
 
             return Ok(result);
@@ -214,6 +240,29 @@ namespace Chat.Api.Controllers
             });
         }
 
+        // GET api/chats/group-avatar-upload-url?contentType=image/jpeg
+        [HttpGet("group-avatar-upload-url")]
+        public ActionResult<object> GetGroupAvatarUploadUrl([FromQuery] string contentType = "image/jpeg")
+        {
+            var bucket = GetBucketName();
+            if (string.IsNullOrWhiteSpace(bucket))
+                return StatusCode(500, "S3 bucket not configured");
+
+            var key = $"group-avatars/{Guid.NewGuid()}";
+            var expiresAt = DateTime.UtcNow.AddMinutes(10);
+
+            var url = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            {
+                BucketName = bucket,
+                Key = key,
+                Verb = HttpVerb.PUT,
+                Expires = expiresAt,
+                ContentType = contentType
+            });
+
+            return Ok(new { uploadUrl = url, key, expiresAt });
+        }
+
         // POST api/chats/group
         [HttpPost("group")]
         public async Task<ActionResult<object>> CreateGroupChat([FromBody] CreateGroupChatRequest request)
@@ -229,7 +278,8 @@ namespace Chat.Api.Controllers
                 IsGroup = true,
                 Name = request.Name,
                 CreatedByUserId = userId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                AvatarKey = string.IsNullOrWhiteSpace(request.AvatarKey) ? null : request.AvatarKey.Trim()
             };
 
             var allMemberIds = (request.MemberIds ?? new List<Guid>()).Distinct().ToList();

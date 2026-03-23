@@ -261,6 +261,33 @@ using (var scope = app.Services.CreateScope())
         "VALUES ('20260323000000_AddUserGroup', '8.0.0')");
     AddColumnIfMissing("Group", "`Group` varchar(100) NULL");
 
+    // AddGroupAvatarKey migration — AvatarKey column on Chats table
+    try
+    {
+        using (var histCmd = conn.CreateCommand())
+        {
+            histCmd.CommandText =
+                "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+                "VALUES ('20260323100000_AddGroupAvatarKey', '8.0.0')";
+            histCmd.ExecuteNonQuery();
+        }
+        using var check = conn.CreateCommand();
+        check.CommandText =
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Chats' AND COLUMN_NAME = 'AvatarKey'";
+        var exists = Convert.ToInt64(check.ExecuteScalar()) > 0;
+        if (!exists)
+        {
+            using var alter = conn.CreateCommand();
+            alter.CommandText = "ALTER TABLE Chats ADD COLUMN AvatarKey varchar(500) NULL";
+            alter.ExecuteNonQuery();
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning("[Migration] AddGroupAvatarKey skipped: {Error}", ex.Message);
+    }
+
     conn.Close();
 
     // Seed Master user if none exists

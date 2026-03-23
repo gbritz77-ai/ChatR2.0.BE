@@ -77,6 +77,9 @@ namespace Chat.Api.Controllers
 
             var items = await _db.ChatMembers
                 .Where(cm => cm.UserId == userId)
+                // Exclude direct chats where the other participant is the Master user
+                .Where(cm => cm.Chat!.IsGroup || !_db.ChatMembers
+                    .Any(x => x.ChatId == cm.ChatId && x.UserId != userId && x.User!.Role == UserRole.Master))
                 .Include(cm => cm.Chat)
                 .Select(cm => new
                 {

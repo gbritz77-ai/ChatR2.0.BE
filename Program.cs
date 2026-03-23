@@ -221,12 +221,16 @@ using (var scope = app.Services.CreateScope())
         "VALUES ('20260318110000_AddAvatarKey', '8.0.0')");
     AddColumnIfMissing("AvatarKey", "AvatarKey varchar(500) NULL");
 
-    // AddMessageEditing migration — adds IsEdited/EditedAt to Messages table
+    // AddMessageEditing migration — use conn directly (avoid conflict with open connection)
     try
     {
-        db.Database.ExecuteSqlRaw(
-            "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
-            "VALUES ('20260320000000_AddMessageEditing', '8.0.0')");
+        using (var histCmd = conn.CreateCommand())
+        {
+            histCmd.CommandText =
+                "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+                "VALUES ('20260320000000_AddMessageEditing', '8.0.0')";
+            histCmd.ExecuteNonQuery();
+        }
         void AddMessageColumnIfMissing(string column, string definition)
         {
             using var check = conn.CreateCommand();

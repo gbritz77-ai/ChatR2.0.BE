@@ -192,6 +192,10 @@ namespace Chat.Api.Controllers
                 _db.Chats.Add(chat);
                 _db.ChatMembers.AddRange(members);
                 await _db.SaveChangesAsync();
+
+                // Notify the other user so their sidebar updates immediately
+                await _chatHub.Clients.User(targetId.ToString())
+                    .SendAsync("NewChatCreated", new { chatId = chat.Id });
             }
 
             return Ok(new

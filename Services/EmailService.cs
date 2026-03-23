@@ -34,12 +34,12 @@ namespace Chat.Api.Services
             var message = new MimeMessage();
             message.From.Add(new MailboxAddress(fromName, fromEmail));
             message.To.Add(new MailboxAddress(username, toEmail));
-            message.Subject = "You've been invited to ImpTrack Chat";
+            message.Subject = "You've been invited to Outsec ChatR";
             message.Body = new TextPart("plain")
             {
                 Text = $@"Hi {username},
 
-You have been invited to ImpTrack Chat.
+You have been invited to Outsec ChatR.
 
 To get started, visit: {appUrl}
 

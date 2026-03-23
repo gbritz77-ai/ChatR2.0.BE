@@ -584,3 +584,36 @@ namespace Chat.Api.Controllers
 
     }
 }
+        // PUT api/chats/{chatId}/messages/{messageId}
+        [HttpPut("{chatId:guid}/messages/{messageId:guid}")]
+        public async Task<IActionResult> EditMessage(Guid chatId, Guid messageId, [FromBody] EditMessageRequest request)
+        {
+            var userId = User.GetUserId();
+
+            var message = await _db.Messages
+                .FirstOrDefaultAsync(m => m.Id == messageId && m.ChatId == chatId);
+
+            if (message == null) return NotFound();
+            if (message.SenderId != userId) return Forbid();
+            if (string.IsNullOrWhiteSpace(request.Text)) return BadRequest("Text cannot be empty.");
+
+            message.Text = request.Text.Trim();
+            message.IsEdited = true;
+            message.EditedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            await _chatHub.Clients.Group(chatId.ToString()).SendAsync("MessageEdited", new
+            {
+                messageId,
+                chatId,
+                text = message.Text,
+                editedAt = message.EditedAt
+            });
+
+            return Ok(new { message.Id, message.Text, message.IsEdited, message.EditedAt });
+        }
+
+        public record EditMessageRequest(string Text);
+
+    }
+}

@@ -221,6 +221,29 @@ using (var scope = app.Services.CreateScope())
         "VALUES ('20260318110000_AddAvatarKey', '8.0.0')");
     AddColumnIfMissing("AvatarKey", "AvatarKey varchar(500) NULL");
 
+    // AddMessageEditing migration — adds IsEdited/EditedAt to Messages table
+    db.Database.ExecuteSqlRaw(
+        "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+        "VALUES ('20260320000000_AddMessageEditing', '8.0.0')");
+    void AddMessageColumnIfMissing(string column, string definition)
+    {
+        using var check = conn.CreateCommand();
+        check.CommandText =
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'Messages' AND COLUMN_NAME = @col";
+        var p = check.CreateParameter(); p.ParameterName = "@col"; p.Value = column;
+        check.Parameters.Add(p);
+        var exists = Convert.ToInt64(check.ExecuteScalar()) > 0;
+        if (!exists)
+        {
+            using var alter = conn.CreateCommand();
+            alter.CommandText = $"ALTER TABLE Messages ADD COLUMN {definition}";
+            alter.ExecuteNonQuery();
+        }
+    }
+    AddMessageColumnIfMissing("IsEdited", "IsEdited tinyint(1) NOT NULL DEFAULT 0");
+    AddMessageColumnIfMissing("EditedAt", "EditedAt datetime(6) NULL");
+
     conn.Close();
 
     // Seed Master user if none exists

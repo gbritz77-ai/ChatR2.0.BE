@@ -16,6 +16,8 @@ namespace Chat.Api.Models
         public string? GifUrl { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public bool IsEdited { get; set; } = false;
+        public DateTime? EditedAt { get; set; }
 
         // We can later add a MessageRead table per user; for now, keep it simple
         public ICollection<Attachment> Attachments { get; set; } = new List<Attachment>();

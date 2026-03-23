@@ -255,6 +255,12 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning("[Migration] AddMessageEditing skipped: {Error}", ex.Message);
     }
 
+    // AddUserGroup migration
+    db.Database.ExecuteSqlRaw(
+        "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+        "VALUES ('20260323000000_AddUserGroup', '8.0.0')");
+    AddColumnIfMissing("Group", "`Group` varchar(100) NULL");
+
     conn.Close();
 
     // Seed Master user if none exists

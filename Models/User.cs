@@ -34,6 +34,9 @@ namespace Chat.Api.Models
         [MaxLength(500)]
         public string? AvatarKey { get; set; }
 
+        [MaxLength(100)]
+        public string? Group { get; set; }
+
         public ICollection<ChatMember> ChatMembers { get; set; } = new List<ChatMember>();
         public ICollection<Message> Messages { get; set; } = new List<Message>();
     }

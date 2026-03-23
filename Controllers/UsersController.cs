@@ -62,9 +62,9 @@ namespace Chat.Api.Controllers
             return Ok(user);
         }
 
-        // GET api/users — list users (optionally filtered by ?search=), excluding current user
+        // GET api/users — list users (optionally filtered by ?search= and/or ?group=), excluding current user
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<object>>> GetUsers([FromQuery] string? search = null)
+        public async Task<ActionResult<IEnumerable<object>>> GetUsers([FromQuery] string? search = null, [FromQuery] string? group = null)
         {
             var currentUserId = User.GetUserId();
 
@@ -79,14 +79,22 @@ namespace Chat.Api.Controllers
                     (u.Email != null && u.Email.ToLower().Contains(term)));
             }
 
+            if (!string.IsNullOrWhiteSpace(group))
+            {
+                var g = group.Trim().ToLower();
+                query = query.Where(u => u.Group != null && u.Group.ToLower() == g);
+            }
+
             var users = await query
-                .OrderBy(u => u.Username)
+                .OrderBy(u => u.Group)
+                .ThenBy(u => u.Username)
                 .Select(u => new
                 {
                     u.Id,
                     u.Username,
                     u.Email,
-                    Role = u.Role.ToString()
+                    Role = u.Role.ToString(),
+                    u.Group
                 })
                 .ToListAsync();
 
@@ -211,9 +219,15 @@ namespace Chat.Api.Controllers
                     Email = email,
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(defaultPassword),
                     Role = UserRole.Staff,
-                    MustChangePassword = true
+                    MustChangePassword = true,
+                    Group = string.IsNullOrWhiteSpace(request.Group) ? null : request.Group.Trim()
                 };
                 _db.Users.Add(user);
+                await _db.SaveChangesAsync();
+            }
+            else if (!string.IsNullOrWhiteSpace(request.Group))
+            {
+                user.Group = request.Group.Trim();
                 await _db.SaveChangesAsync();
             }
 

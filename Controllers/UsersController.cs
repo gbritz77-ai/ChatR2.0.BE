@@ -69,7 +69,7 @@ namespace Chat.Api.Controllers
             var currentUserId = User.GetUserId();
 
             var query = _db.Users
-                .Where(u => u.Id != currentUserId);
+                .Where(u => u.Id != currentUserId && u.Role != UserRole.Master);
 
             if (!string.IsNullOrWhiteSpace(search))
             {

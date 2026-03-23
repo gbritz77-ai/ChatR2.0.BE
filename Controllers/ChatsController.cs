@@ -578,12 +578,6 @@ namespace Chat.Api.Controllers
             return Ok(dto);
         }
 
-
-
-
-
-    }
-}
         // PUT api/chats/{chatId}/messages/{messageId}
         [HttpPut("{chatId:guid}/messages/{messageId:guid}")]
         public async Task<IActionResult> EditMessage(Guid chatId, Guid messageId, [FromBody] EditMessageRequest request)

@@ -248,7 +248,7 @@ using (var scope = app.Services.CreateScope())
             }
         }
         AddMessageColumnIfMissing("IsEdited", "IsEdited tinyint(1) NOT NULL DEFAULT 0");
-        AddMessageColumnIfMissing("EditedAt", "EditedAt datetime(6) NULL");
+        AddMessageColumnIfMissing("EditedAt", "EditedAt datetime NULL");
     }
     catch (Exception ex)
     {

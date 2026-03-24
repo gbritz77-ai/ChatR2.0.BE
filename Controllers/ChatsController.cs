@@ -131,6 +131,11 @@ namespace Chat.Api.Controllers
                         .Select(x => x.User!.Group)
                         .FirstOrDefault(),
 
+                    OtherMemberLastReadAt = _db.ChatMembers
+                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
+                        .Select(x => x.LastReadAt)
+                        .FirstOrDefault(),
+
                     ChatAvatarKey = cm.Chat!.AvatarKey,
 
                     // ✅ FIX: don't count your own messages as unread
@@ -157,6 +162,7 @@ namespace Chat.Api.Controllers
                 otherUserAvailabilityTo   = i.OtherUserAvailabilityTo,
                 otherUserHasAvatar        = i.OtherUserHasAvatar,
                 otherUserGroup            = i.OtherUserGroup,
+                otherMemberLastReadAt     = i.OtherMemberLastReadAt,
                 chatAvatarUrl             = GetPresignedGetUrl(i.ChatAvatarKey),
             });
 
@@ -612,6 +618,10 @@ namespace Chat.Api.Controllers
             // Set LastReadAt to "now"
             membership.LastReadAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
+
+            // Notify other members so their sent-message ticks update in real-time
+            await _chatHub.Clients.Group(chatId.ToString())
+                .SendAsync("ChatRead", new { chatId, userId, lastReadAt = membership.LastReadAt });
 
             return NoContent();
         }

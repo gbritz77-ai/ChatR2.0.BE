@@ -19,6 +19,9 @@ namespace Chat.Api.Models
         public bool IsEdited { get; set; } = false;
         public DateTime? EditedAt { get; set; }
 
+        public Guid? ReplyToMessageId { get; set; }
+        public Message? ReplyToMessage { get; set; }
+
         // We can later add a MessageRead table per user; for now, keep it simple
         public ICollection<Attachment> Attachments { get; set; } = new List<Attachment>();
     }

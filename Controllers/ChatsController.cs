@@ -52,7 +52,7 @@ namespace Chat.Api.Controllers
         // DTOs (nested records) ---------------------------------
         public record CreatePrivateChatRequest(Guid TargetUserId);
         public record CreateGroupChatRequest(string Name, List<Guid> MemberIds, string? AvatarKey = null);
-        public record SendMessageRequest(string? Text, List<Guid>? AttachmentIds = null, Guid? AttachmentId = null, string? GifUrl = null);
+        public record SendMessageRequest(string? Text, List<Guid>? AttachmentIds = null, Guid? AttachmentId = null, string? GifUrl = null, Guid? ReplyToMessageId = null);
         public record AttachmentDto(Guid Id, string FileName, string ContentType, string Url);
 
 
@@ -525,6 +525,7 @@ namespace Chat.Api.Controllers
             var msgs = await _db.Messages
                 .Where(m => m.ChatId == chatId)
                 .Include(m => m.Sender)
+                .Include(m => m.ReplyToMessage).ThenInclude(r => r!.Sender)
                 .OrderByDescending(m => m.CreatedAt)
                 .Skip(skip)
                 .Take(take)
@@ -536,7 +537,12 @@ namespace Chat.Api.Controllers
                     SenderUserName = m.Sender.Username,
                     m.Text,
                     m.CreatedAt,
-                    m.GifUrl
+                    m.GifUrl,
+                    m.IsEdited,
+                    m.EditedAt,
+                    m.ReplyToMessageId,
+                    ReplyToSenderName = m.ReplyToMessage != null && m.ReplyToMessage.Sender != null ? m.ReplyToMessage.Sender.Username : null,
+                    ReplyToText = m.ReplyToMessage != null ? m.ReplyToMessage.Text : null,
                 })
                 .ToListAsync();
 
@@ -572,6 +578,14 @@ namespace Chat.Api.Controllers
                 m.Text,
                 m.CreatedAt,
                 m.GifUrl,
+                m.IsEdited,
+                m.EditedAt,
+                ReplyTo = m.ReplyToMessageId.HasValue ? new
+                {
+                    id = m.ReplyToMessageId.Value,
+                    senderName = m.ReplyToSenderName,
+                    text = m.ReplyToText
+                } : null,
                 Attachments = attachmentsByMessage.TryGetValue(m.Id, out var list)
                     ? list
                     : new List<AttachmentDto>()
@@ -631,7 +645,8 @@ namespace Chat.Api.Controllers
                 SenderId = userId,
                 Text = hasText ? text! : string.Empty,
                 GifUrl = hasGif ? gifUrl : null,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                ReplyToMessageId = request.ReplyToMessageId
             };
 
             _db.Messages.Add(message);
@@ -661,6 +676,17 @@ namespace Chat.Api.Controllers
             .ToList();
 
 
+            // Load reply-to preview if present
+            object? replyTo = null;
+            if (message.ReplyToMessageId.HasValue)
+            {
+                var replied = await _db.Messages
+                    .Include(m => m.Sender)
+                    .FirstOrDefaultAsync(m => m.Id == message.ReplyToMessageId.Value);
+                if (replied != null)
+                    replyTo = new { id = replied.Id, senderName = replied.Sender?.Username, text = replied.Text };
+            }
+
             var dto = new
             {
                 message.Id,
@@ -670,7 +696,8 @@ namespace Chat.Api.Controllers
                 message.Text,
                 message.CreatedAt,
                 GifUrl = message.GifUrl,
-                Attachments = attachmentDtos
+                Attachments = attachmentDtos,
+                ReplyTo = replyTo
             };
 
             // 1) Push the message to anyone viewing this chat

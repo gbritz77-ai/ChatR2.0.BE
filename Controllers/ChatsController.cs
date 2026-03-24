@@ -451,6 +451,66 @@ namespace Chat.Api.Controllers
             return NoContent();
         }
 
+        // DELETE api/chats/{chatId} — creator only, deletes the entire group
+        [HttpDelete("{chatId:guid}")]
+        public async Task<ActionResult> DeleteGroup(Guid chatId)
+        {
+            var userId = User.GetUserId();
+
+            var chat = await _db.Chats
+                .Include(c => c.Members)
+                .FirstOrDefaultAsync(c => c.Id == chatId);
+
+            if (chat == null) return NotFound();
+            if (!chat.IsGroup) return BadRequest("Only group chats can be deleted.");
+            if (chat.CreatedByUserId != userId) return Forbid();
+
+            // Notify all members before deleting
+            await _chatHub.Clients.Group(chatId.ToString()).SendAsync("GroupDeleted", new { chatId });
+
+            // Remove all attachments, messages, members, then the chat
+            var messageIds = await _db.Messages.Where(m => m.ChatId == chatId).Select(m => m.Id).ToListAsync();
+            await _db.Attachments.Where(a => a.MessageId != null && messageIds.Contains(a.MessageId.Value)).ExecuteDeleteAsync();
+            await _db.Messages.Where(m => m.ChatId == chatId).ExecuteDeleteAsync();
+            await _db.ChatMembers.Where(cm => cm.ChatId == chatId).ExecuteDeleteAsync();
+            _db.Chats.Remove(chat);
+            await _db.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        // PUT api/chats/{chatId}/avatar — update group avatar (creator only)
+        [HttpPut("{chatId:guid}/avatar")]
+        public async Task<ActionResult> UpdateGroupAvatar(Guid chatId, [FromBody] UpdateGroupAvatarRequest request)
+        {
+            var userId = User.GetUserId();
+
+            var chat = await _db.Chats.FirstOrDefaultAsync(c => c.Id == chatId);
+            if (chat == null) return NotFound();
+            if (!chat.IsGroup) return BadRequest("Only group chats have avatars.");
+            if (chat.CreatedByUserId != userId) return Forbid();
+
+            chat.AvatarKey = request.AvatarKey?.Trim();
+            await _db.SaveChangesAsync();
+
+            var bucket = GetBucketName();
+            string? avatarUrl = null;
+            if (!string.IsNullOrWhiteSpace(chat.AvatarKey) && !string.IsNullOrWhiteSpace(bucket))
+            {
+                avatarUrl = _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+                {
+                    BucketName = bucket,
+                    Key = chat.AvatarKey,
+                    Verb = HttpVerb.GET,
+                    Expires = DateTime.UtcNow.AddHours(2)
+                });
+            }
+
+            await _chatHub.Clients.Group(chatId.ToString()).SendAsync("GroupAvatarUpdated", new { chatId, avatarUrl });
+
+            return Ok(new { avatarUrl });
+        }
+
         [HttpGet("{chatId:guid}/messages")]
         public async Task<ActionResult<IEnumerable<object>>> GetMessages(Guid chatId, [FromQuery] int skip = 0, [FromQuery] int take = 50)
         {
@@ -667,6 +727,7 @@ namespace Chat.Api.Controllers
         }
 
         public record EditMessageRequest(string Text);
+        public record UpdateGroupAvatarRequest(string? AvatarKey);
 
         // DELETE api/chats/{chatId}/messages/{messageId}
         [HttpDelete("{chatId:guid}/messages/{messageId:guid}")]

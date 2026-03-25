@@ -289,6 +289,36 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning("[Migration] AddGroupAvatarKey skipped: {Error}", ex.Message);
     }
 
+    // AddMessageReactions migration
+    try
+    {
+        using (var histCmd = conn.CreateCommand())
+        {
+            histCmd.CommandText =
+                "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+                "VALUES ('20260325000000_AddMessageReactions', '8.0.0')";
+            histCmd.ExecuteNonQuery();
+        }
+        using var createCmd = conn.CreateCommand();
+        createCmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS MessageReactions (
+                Id char(36) NOT NULL,
+                MessageId char(36) NOT NULL,
+                UserId char(36) NOT NULL,
+                Emoji varchar(10) NOT NULL,
+                CreatedAt datetime NOT NULL,
+                PRIMARY KEY (Id),
+                UNIQUE KEY uq_reaction (MessageId, UserId, Emoji),
+                CONSTRAINT fk_reaction_message FOREIGN KEY (MessageId) REFERENCES Messages(Id) ON DELETE CASCADE,
+                CONSTRAINT fk_reaction_user FOREIGN KEY (UserId) REFERENCES Users(Id) ON DELETE CASCADE
+            )";
+        createCmd.ExecuteNonQuery();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning("[Migration] AddMessageReactions skipped: {Error}", ex.Message);
+    }
+
     conn.Close();
 
     // Seed Master user if none exists

@@ -24,5 +24,6 @@ namespace Chat.Api.Models
 
         // We can later add a MessageRead table per user; for now, keep it simple
         public ICollection<Attachment> Attachments { get; set; } = new List<Attachment>();
+        public ICollection<MessageReaction> Reactions { get; set; } = new List<MessageReaction>();
     }
 }

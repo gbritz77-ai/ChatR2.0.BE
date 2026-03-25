@@ -575,6 +575,20 @@ namespace Chat.Api.Controllers
                     g => g.Select(x => new AttachmentDto(x.Id, x.FileName, x.ContentType, x.Url)).ToList()
                 );
 
+            var reactionRows = await _db.MessageReactions
+                .Where(r => messageIds.Contains(r.MessageId))
+                .Select(r => new { r.MessageId, r.Emoji, r.UserId })
+                .ToListAsync();
+
+            var reactionsByMessage = reactionRows
+                .GroupBy(r => r.MessageId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.GroupBy(r => r.Emoji)
+                          .Select(eg => new { emoji = eg.Key, count = eg.Count(), userIds = eg.Select(r => r.UserId).ToList() })
+                          .ToList()
+                );
+
             var result = msgs.Select(m => new
             {
                 m.Id,
@@ -594,7 +608,10 @@ namespace Chat.Api.Controllers
                 } : null,
                 Attachments = attachmentsByMessage.TryGetValue(m.Id, out var list)
                     ? list
-                    : new List<AttachmentDto>()
+                    : new List<AttachmentDto>(),
+                Reactions = reactionsByMessage.TryGetValue(m.Id, out var rxns)
+                    ? rxns.Select(r => new { r.emoji, r.count, r.userIds }).ToList<object>()
+                    : new List<object>()
             });
 
             return Ok(result);
@@ -765,6 +782,53 @@ namespace Chat.Api.Controllers
 
         public record EditMessageRequest(string Text);
         public record UpdateGroupAvatarRequest(string? AvatarKey);
+
+        // POST api/chats/{chatId}/messages/{messageId}/reactions — toggle
+        [HttpPost("{chatId:guid}/messages/{messageId:guid}/reactions")]
+        public async Task<IActionResult> ToggleReaction(Guid chatId, Guid messageId, [FromBody] ToggleReactionRequest request)
+        {
+            var userId = User.GetUserId();
+            if (string.IsNullOrWhiteSpace(request.Emoji)) return BadRequest("Emoji required.");
+
+            var isMember = await _db.ChatMembers.AnyAsync(cm => cm.ChatId == chatId && cm.UserId == userId);
+            if (!isMember) return Forbid();
+
+            var message = await _db.Messages.FirstOrDefaultAsync(m => m.Id == messageId && m.ChatId == chatId);
+            if (message == null) return NotFound();
+
+            var existing = await _db.MessageReactions.FirstOrDefaultAsync(r =>
+                r.MessageId == messageId && r.UserId == userId && r.Emoji == request.Emoji);
+
+            if (existing != null)
+                _db.MessageReactions.Remove(existing);
+            else
+                _db.MessageReactions.Add(new MessageReaction
+                {
+                    Id = Guid.NewGuid(),
+                    MessageId = messageId,
+                    UserId = userId,
+                    Emoji = request.Emoji,
+                    CreatedAt = DateTime.UtcNow
+                });
+
+            await _db.SaveChangesAsync();
+
+            var reactions = await _db.MessageReactions
+                .Where(r => r.MessageId == messageId)
+                .Select(r => new { r.Emoji, r.UserId })
+                .ToListAsync();
+
+            var reactionSummary = reactions
+                .GroupBy(r => r.Emoji)
+                .Select(g => new { emoji = g.Key, count = g.Count(), userIds = g.Select(r => r.UserId).ToList() })
+                .ToList();
+
+            await _chatHub.Clients.Group(chatId.ToString())
+                .SendAsync("ReactionUpdated", new { messageId, chatId, reactions = reactionSummary });
+
+            return Ok(new { reactions = reactionSummary });
+        }
+        public record ToggleReactionRequest(string Emoji);
 
         // DELETE api/chats/{chatId}/messages/{messageId}
         [HttpDelete("{chatId:guid}/messages/{messageId:guid}")]

@@ -15,6 +15,7 @@ namespace Chat.Api.Data
         public DbSet<ChatMember> ChatMembers => Set<ChatMember>();
         public DbSet<Message> Messages => Set<Message>();
         public DbSet<Attachment> Attachments => Set<Attachment>();
+        public DbSet<MessageReaction> MessageReactions => Set<MessageReaction>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -53,6 +54,16 @@ namespace Chat.Api.Data
                 .HasOne(a => a.Message)
                 .WithMany(m => m.Attachments)
                 .HasForeignKey(a => a.MessageId);
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasOne(r => r.Message)
+                .WithMany(m => m.Reactions)
+                .HasForeignKey(r => r.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<MessageReaction>()
+                .HasIndex(r => new { r.MessageId, r.UserId, r.Emoji })
+                .IsUnique();
 
             // Store UserRole enum as string in the DB ("Admin", "Staff")
             modelBuilder.Entity<User>()

@@ -1,6 +1,7 @@
 using Chat.Api.Auth;
 using Chat.Api.Data;
 using Chat.Api.Models;
+using Chat.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -11,10 +12,12 @@ namespace Chat.Api.Hubs
     public class ChatHub : Hub
     {
         private readonly ChatDbContext _db;
+        private readonly CallManager _calls;
 
-        public ChatHub(ChatDbContext db)
+        public ChatHub(ChatDbContext db, CallManager calls)
         {
             _db = db;
+            _calls = calls;
         }
 
         public override async Task OnConnectedAsync()
@@ -49,7 +52,6 @@ namespace Chat.Api.Hubs
             await base.OnDisconnectedAsync(exception);
         }
 
-        // Notify all users who share a chat with this user
         private async Task BroadcastPresence(Guid userId, bool isOnline)
         {
             var contactIds = await _db.ChatMembers
@@ -65,15 +67,9 @@ namespace Chat.Api.Hubs
                 await Clients.User(contactId.ToString()).SendAsync("UserPresenceChanged", payload);
         }
 
-        // Called by client when opening a chat
         public async Task JoinChat(Guid chatId)
         {
-            var principal = Context.User;
-
-            if (principal == null)
-                throw new HubException("Unauthenticated connection");
-
-            var userId = principal.GetUserId();
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
 
             var isMember = await _db.ChatMembers
                 .AnyAsync(cm => cm.ChatId == chatId && cm.UserId == userId);
@@ -84,24 +80,16 @@ namespace Chat.Api.Hubs
             await Groups.AddToGroupAsync(Context.ConnectionId, chatId.ToString());
         }
 
-        // Send a message to a chat
         public async Task SendMessage(Guid chatId, string text)
         {
-            var principal = Context.User;
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
 
-            if (principal == null)
-                throw new HubException("Unauthenticated connection");
-
-            if (string.IsNullOrWhiteSpace(text))
-                return;
-
-            var userId = principal.GetUserId();
+            if (string.IsNullOrWhiteSpace(text)) return;
 
             var isMember = await _db.ChatMembers
                 .AnyAsync(cm => cm.ChatId == chatId && cm.UserId == userId);
 
-            if (!isMember)
-                throw new HubException("Not a member of this chat");
+            if (!isMember) throw new HubException("Not a member of this chat");
 
             var message = new Message
             {
@@ -122,6 +110,135 @@ namespace Chat.Api.Hubs
                 message.SenderId,
                 message.Text,
                 message.CreatedAt
+            });
+        }
+
+        // ─── Video Call Signaling ────────────────────────────────────────────────
+
+        public async Task CallUser(string targetUserId, string? chatId)
+        {
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
+            var callerName = Context.User?.Identity?.Name ?? "Unknown";
+
+            var chatGuid = chatId != null ? Guid.Parse(chatId) : (Guid?)null;
+            var session = _calls.CreateCall(userId, callerName, chatGuid);
+            _calls.AddParticipant(session.CallId, userId, Context.ConnectionId);
+
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{session.CallId}");
+
+            await Clients.User(targetUserId).SendAsync("IncomingCall", new
+            {
+                callId = session.CallId,
+                callerId = userId.ToString(),
+                callerName,
+                chatId
+            });
+        }
+
+        public async Task AcceptCall(string callId)
+        {
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
+
+            if (!_calls.TryGetCall(callId, out var session) || session == null)
+                throw new HubException("Call not found or already ended");
+
+            _calls.AddParticipant(callId, userId, Context.ConnectionId);
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{callId}");
+
+            var others = session.Participants
+                .Where(p => p.Key != userId)
+                .Select(p => new { userId = p.Key.ToString(), connectionId = p.Value })
+                .ToList();
+
+            await Clients.Caller.SendAsync("CallAccepted", new { callId, participants = others });
+
+            await Clients.OthersInGroup($"call_{callId}").SendAsync("UserJoinedCall", new
+            {
+                callId,
+                userId = userId.ToString(),
+                connectionId = Context.ConnectionId
+            });
+        }
+
+        public async Task RejectCall(string callId)
+        {
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
+
+            if (_calls.TryGetCall(callId, out var session) && session != null)
+            {
+                await Clients.User(session.CallerId.ToString()).SendAsync("CallRejected", new
+                {
+                    callId,
+                    userId = userId.ToString()
+                });
+                if (session.Participants.Count <= 1)
+                    _calls.EndCall(callId);
+            }
+        }
+
+        public async Task HangUp(string callId)
+        {
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
+
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"call_{callId}");
+            _calls.RemoveParticipant(callId, userId);
+
+            await Clients.Group($"call_{callId}").SendAsync("UserLeftCall", new
+            {
+                callId,
+                userId = userId.ToString()
+            });
+
+            if (!_calls.TryGetCall(callId, out _))
+                await Clients.Group($"call_{callId}").SendAsync("CallEnded", new { callId });
+        }
+
+        public async Task InviteToCall(string callId, string targetUserId)
+        {
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
+            var callerName = Context.User?.Identity?.Name ?? "Unknown";
+
+            if (!_calls.TryGetCall(callId, out _))
+                throw new HubException("Call not found");
+
+            await Clients.User(targetUserId).SendAsync("IncomingCall", new
+            {
+                callId,
+                callerId = userId.ToString(),
+                callerName,
+                isGroupInvite = true
+            });
+        }
+
+        // ─── WebRTC Signaling Relay ──────────────────────────────────────────────
+
+        public async Task SendOffer(string callId, string targetConnectionId, object offer)
+        {
+            await Clients.Client(targetConnectionId).SendAsync("ReceiveOffer", new
+            {
+                callId,
+                fromConnectionId = Context.ConnectionId,
+                offer
+            });
+        }
+
+        public async Task SendAnswer(string callId, string targetConnectionId, object answer)
+        {
+            await Clients.Client(targetConnectionId).SendAsync("ReceiveAnswer", new
+            {
+                callId,
+                fromConnectionId = Context.ConnectionId,
+                answer
+            });
+        }
+
+        public async Task SendIceCandidate(string callId, string targetConnectionId, object candidate)
+        {
+            await Clients.Client(targetConnectionId).SendAsync("ReceiveIceCandidate", new
+            {
+                callId,
+                fromConnectionId = Context.ConnectionId,
+                candidate
             });
         }
     }

@@ -25,6 +25,9 @@ namespace Chat.Api.Hubs
             var userId = Context.User?.GetUserId();
             if (userId.HasValue)
             {
+                // Add to personal group so we can target this user reliably
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"user_{userId.Value}");
+
                 var user = await _db.Users.FindAsync(userId.Value);
                 if (user != null)
                 {
@@ -126,7 +129,7 @@ namespace Chat.Api.Hubs
 
             await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{session.CallId}");
 
-            await Clients.User(targetUserId).SendAsync("IncomingCall", new
+            await Clients.Group($"user_{targetUserId}").SendAsync("IncomingCall", new
             {
                 callId = session.CallId,
                 callerId = userId.ToString(),
@@ -169,7 +172,7 @@ namespace Chat.Api.Hubs
 
             if (_calls.TryGetCall(callId, out var session) && session != null)
             {
-                await Clients.User(session.CallerId.ToString()).SendAsync("CallRejected", new
+                await Clients.Group($"user_{session.CallerId}").SendAsync("CallRejected", new
                 {
                     callId,
                     userId = userId.ToString()
@@ -204,7 +207,7 @@ namespace Chat.Api.Hubs
             if (!_calls.TryGetCall(callId, out _))
                 throw new HubException("Call not found");
 
-            await Clients.User(targetUserId).SendAsync("IncomingCall", new
+            await Clients.Group($"user_{targetUserId}").SendAsync("IncomingCall", new
             {
                 callId,
                 callerId = userId.ToString(),

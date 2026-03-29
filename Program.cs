@@ -67,6 +67,7 @@ builder.Services.AddSingleton<IEmailService, EmailService>();
 // ---------- Controllers & SignalR ----------
 builder.Services.AddSingleton<Chat.Api.Services.CallManager>();
 builder.Services.AddControllers();
+builder.Services.AddHttpClient();
 builder.Services.AddSignalR();
 builder.Services.AddHttpContextAccessor();
 

@@ -133,6 +133,9 @@ namespace Chat.Api.Hubs
                 callerName,
                 chatId
             });
+
+            // Tell the caller their callId so they can hang up
+            await Clients.Caller.SendAsync("CallCreated", new { callId = session.CallId });
         }
 
         public async Task AcceptCall(string callId)

@@ -129,6 +129,8 @@ namespace Chat.Api.Hubs
 
             await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{session.CallId}");
 
+            _calls.AddPendingInvitee(session.CallId, Guid.Parse(targetUserId));
+
             await Clients.Group($"user_{targetUserId}").SendAsync("IncomingCall", new
             {
                 callId = session.CallId,
@@ -149,6 +151,7 @@ namespace Chat.Api.Hubs
                 throw new HubException("Call not found or already ended");
 
             _calls.AddParticipant(callId, userId, Context.ConnectionId);
+            _calls.RemovePendingInvitee(callId, userId);
             await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{callId}");
 
             var others = session.Participants
@@ -186,6 +189,9 @@ namespace Chat.Api.Hubs
         {
             var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
 
+            // Notify any pending invitees (still ringing) that the call ended
+            var pendingInvitees = _calls.GetPendingInvitees(callId).ToList();
+
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"call_{callId}");
             _calls.RemoveParticipant(callId, userId);
 
@@ -196,7 +202,13 @@ namespace Chat.Api.Hubs
             });
 
             if (!_calls.TryGetCall(callId, out _))
+            {
                 await Clients.Group($"call_{callId}").SendAsync("CallEnded", new { callId });
+
+                // Also notify pending invitees who never joined the call group
+                foreach (var inviteeId in pendingInvitees)
+                    await Clients.Group($"user_{inviteeId}").SendAsync("CallEnded", new { callId });
+            }
         }
 
         public async Task InviteToCall(string callId, string targetUserId)
@@ -206,6 +218,8 @@ namespace Chat.Api.Hubs
 
             if (!_calls.TryGetCall(callId, out _))
                 throw new HubException("Call not found");
+
+            _calls.AddPendingInvitee(callId, Guid.Parse(targetUserId));
 
             await Clients.Group($"user_{targetUserId}").SendAsync("IncomingCall", new
             {

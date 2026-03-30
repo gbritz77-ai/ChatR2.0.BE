@@ -9,6 +9,7 @@ namespace Chat.Api.Services
         public string CallerName { get; set; } = "";
         public Guid? ChatId { get; set; }
         public ConcurrentDictionary<Guid, string> Participants { get; set; } = new(); // userId -> connectionId
+        public ConcurrentDictionary<Guid, byte> PendingInvitees { get; set; } = new(); // users who are ringing but haven't answered
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 
@@ -36,6 +37,25 @@ namespace Chat.Api.Services
         {
             if (_calls.TryGetValue(callId, out var session))
                 session.Participants[userId] = connectionId;
+        }
+
+        public void AddPendingInvitee(string callId, Guid userId)
+        {
+            if (_calls.TryGetValue(callId, out var session))
+                session.PendingInvitees[userId] = 0;
+        }
+
+        public void RemovePendingInvitee(string callId, Guid userId)
+        {
+            if (_calls.TryGetValue(callId, out var session))
+                session.PendingInvitees.TryRemove(userId, out _);
+        }
+
+        public IEnumerable<Guid> GetPendingInvitees(string callId)
+        {
+            if (_calls.TryGetValue(callId, out var session))
+                return session.PendingInvitees.Keys.ToList();
+            return Enumerable.Empty<Guid>();
         }
 
         public void RemoveParticipant(string callId, Guid userId)

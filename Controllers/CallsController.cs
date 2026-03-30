@@ -21,7 +21,7 @@ public class CallsController : ControllerBase
     public async Task<IActionResult> GetTurnCredentials()
     {
         var domain = _config["Metered:Domain"];
-        var secretKey = _config["Metered:SecretKey"];
+        var secretKey = _config["Metered:ApiKey"];
 
         if (string.IsNullOrEmpty(domain) || string.IsNullOrEmpty(secretKey))
             return StatusCode(503, "TURN server not configured");
@@ -30,8 +30,11 @@ public class CallsController : ControllerBase
         {
             var client = _httpClientFactory.CreateClient();
             var url = $"https://{domain}/api/v1/turn/credentials?apiKey={secretKey}";
-            var response = await client.GetStringAsync(url);
-            return Content(response, "application/json");
+            var httpResponse = await client.GetAsync(url);
+            var body = await httpResponse.Content.ReadAsStringAsync();
+            if (!httpResponse.IsSuccessStatusCode)
+                return StatusCode(502, $"Metered API error {(int)httpResponse.StatusCode}: {body}");
+            return Content(body, "application/json");
         }
         catch (Exception ex)
         {

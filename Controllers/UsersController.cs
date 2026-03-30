@@ -225,9 +225,13 @@ namespace Chat.Api.Controllers
                 _db.Users.Add(user);
                 await _db.SaveChangesAsync();
             }
-            else if (!string.IsNullOrWhiteSpace(request.Group))
+            else
             {
-                user.Group = request.Group.Trim();
+                // Re-invite: reset password so the email credentials work
+                user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(defaultPassword);
+                user.MustChangePassword = true;
+                if (!string.IsNullOrWhiteSpace(request.Group))
+                    user.Group = request.Group.Trim();
                 await _db.SaveChangesAsync();
             }
 
@@ -244,6 +248,22 @@ namespace Chat.Api.Controllers
             }
 
             return Ok(new { message = $"Invitation sent to {email}" });
+        }
+
+        // POST api/users/{id}/reset-password — Master only, resets to default temp password
+        [HttpPost("{id:guid}/reset-password")]
+        [Authorize(Roles = "Master")]
+        public async Task<IActionResult> ResetPassword(Guid id)
+        {
+            var user = await _db.Users.FindAsync(id);
+            if (user == null) return NotFound();
+
+            const string defaultPassword = "Outsec@2026";
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(defaultPassword);
+            user.MustChangePassword = true;
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"Password reset to default for {user.Username}" });
         }
     }
 }

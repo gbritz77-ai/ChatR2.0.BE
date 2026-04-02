@@ -211,6 +211,48 @@ namespace Chat.Api.Hubs
             }
         }
 
+        public async Task CallGroup(string chatId)
+        {
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
+            var callerName = Context.User?.Identity?.Name ?? "Unknown";
+
+            var chatGuid = Guid.Parse(chatId);
+
+            var memberIds = await _db.ChatMembers
+                .Where(m => m.ChatId == chatGuid && m.UserId != userId)
+                .Select(m => m.UserId)
+                .ToListAsync();
+
+            if (!memberIds.Any())
+                throw new HubException("No other members in this group");
+
+            var session = _calls.CreateCall(userId, callerName, chatGuid);
+            _calls.AddParticipant(session.CallId, userId, Context.ConnectionId);
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{session.CallId}");
+
+            foreach (var memberId in memberIds)
+                _calls.AddPendingInvitee(session.CallId, memberId);
+
+            var groupName = await _db.Chats
+                .Where(c => c.Id == chatGuid)
+                .Select(c => c.Name)
+                .FirstOrDefaultAsync() ?? "Group";
+
+            foreach (var memberId in memberIds)
+            {
+                await Clients.Group($"user_{memberId}").SendAsync("IncomingCall", new
+                {
+                    callId = session.CallId,
+                    callerId = userId.ToString(),
+                    callerName,
+                    chatId,
+                    groupName
+                });
+            }
+
+            await Clients.Caller.SendAsync("CallCreated", new { callId = session.CallId });
+        }
+
         public async Task InviteToCall(string callId, string targetUserId)
         {
             var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");

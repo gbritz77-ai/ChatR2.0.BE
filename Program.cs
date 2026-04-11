@@ -34,7 +34,11 @@ builder.Services.AddCors(options =>
             .WithOrigins(
                 "http://localhost:5173",
                 "https://main.d1imfsef8qotjc.amplifyapp.com",
-                "https://d1gnxnjelgzuho.cloudfront.net"
+                "https://d1gnxnjelgzuho.cloudfront.net",
+                // Capacitor Android app origins
+                "https://localhost",
+                "capacitor://localhost",
+                "http://localhost"
             )
             .AllowAnyHeader()
             .AllowAnyMethod()

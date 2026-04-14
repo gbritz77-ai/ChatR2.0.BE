@@ -55,6 +55,20 @@ namespace Chat.Api.Hubs
             await base.OnDisconnectedAsync(exception);
         }
 
+        public async Task PingPresence()
+        {
+            var userId = Context.User?.GetUserId();
+            if (!userId.HasValue) return;
+
+            var user = await _db.Users.FindAsync(userId.Value);
+            if (user != null)
+            {
+                user.LastSeenAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+                await BroadcastPresence(userId.Value, true);
+            }
+        }
+
         private async Task BroadcastPresence(Guid userId, bool isOnline)
         {
             var contactIds = await _db.ChatMembers
@@ -67,7 +81,7 @@ namespace Chat.Api.Hubs
             var payload = new { userId, isOnline };
 
             foreach (var contactId in contactIds)
-                await Clients.User(contactId.ToString()).SendAsync("UserPresenceChanged", payload);
+                await Clients.Group($"user_{contactId}").SendAsync("UserPresenceChanged", payload);
         }
 
         public async Task JoinChat(Guid chatId)

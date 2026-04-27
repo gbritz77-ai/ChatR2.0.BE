@@ -278,6 +278,9 @@ using (var scope = app.Services.CreateScope())
     AddColumnIfMissing("PasswordResetToken", "PasswordResetToken varchar(100) NULL");
     AddColumnIfMissing("PasswordResetTokenExpiry", "PasswordResetTokenExpiry datetime NULL");
 
+    // AddAvailabilitySchedule — per-day JSON schedule
+    AddColumnIfMissing("AvailabilitySchedule", "AvailabilitySchedule text NULL");
+
     // AddGroupAvatarKey migration — AvatarKey column on Chats table
     try
     {

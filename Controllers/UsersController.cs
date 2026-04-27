@@ -49,9 +49,7 @@ namespace Chat.Api.Controllers
                     u.Email,
                     Role = u.Role.ToString(),
                     u.CreatedAt,
-                    u.AvailabilityDays,
-                    u.AvailabilityFrom,
-                    u.AvailabilityTo,
+                    u.AvailabilitySchedule,
                     HasAvatar = u.AvatarKey != null
                 })
                 .FirstOrDefaultAsync();
@@ -94,14 +92,15 @@ namespace Chat.Api.Controllers
                     u.Username,
                     u.Email,
                     Role = u.Role.ToString(),
-                    u.Group
+                    u.Group,
+                    u.AvailabilitySchedule
                 })
                 .ToListAsync();
 
             return Ok(users);
         }
 
-        public record UpdateAvailabilityRequest(string? Days, string? From, string? To);
+        public record UpdateAvailabilityRequest(string? Schedule);
 
         [HttpPut("me/availability")]
         public async Task<IActionResult> UpdateAvailability([FromBody] UpdateAvailabilityRequest request)
@@ -110,9 +109,7 @@ namespace Chat.Api.Controllers
             var user = await _db.Users.FindAsync(userId);
             if (user == null) return NotFound();
 
-            user.AvailabilityDays = string.IsNullOrWhiteSpace(request.Days) ? null : request.Days.Trim();
-            user.AvailabilityFrom = string.IsNullOrWhiteSpace(request.From) ? null : request.From.Trim();
-            user.AvailabilityTo   = string.IsNullOrWhiteSpace(request.To)   ? null : request.To.Trim();
+            user.AvailabilitySchedule = string.IsNullOrWhiteSpace(request.Schedule) ? null : request.Schedule.Trim();
 
             await _db.SaveChangesAsync();
             return NoContent();

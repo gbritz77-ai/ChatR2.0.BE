@@ -106,19 +106,9 @@ namespace Chat.Api.Controllers
                         .Select(x => x.User!.LastSeenAt)
                         .FirstOrDefault(),
 
-                    OtherUserAvailabilityDays = _db.ChatMembers
+                    OtherUserAvailabilitySchedule = _db.ChatMembers
                         .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
-                        .Select(x => x.User!.AvailabilityDays)
-                        .FirstOrDefault(),
-
-                    OtherUserAvailabilityFrom = _db.ChatMembers
-                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
-                        .Select(x => x.User!.AvailabilityFrom)
-                        .FirstOrDefault(),
-
-                    OtherUserAvailabilityTo = _db.ChatMembers
-                        .Where(x => x.ChatId == cm.ChatId && x.UserId != userId)
-                        .Select(x => x.User!.AvailabilityTo)
+                        .Select(x => x.User!.AvailabilitySchedule)
                         .FirstOrDefault(),
 
                     OtherUserHasAvatar = _db.ChatMembers
@@ -157,9 +147,7 @@ namespace Chat.Api.Controllers
                 createdByUserId = i.CreatedByUserId,
                 otherUserId = i.OtherUserId,
                 otherUserLastSeenAt = i.OtherUserLastSeenAt,
-                otherUserAvailabilityDays = i.OtherUserAvailabilityDays,
-                otherUserAvailabilityFrom = i.OtherUserAvailabilityFrom,
-                otherUserAvailabilityTo   = i.OtherUserAvailabilityTo,
+                otherUserAvailabilitySchedule = i.OtherUserAvailabilitySchedule,
                 otherUserHasAvatar        = i.OtherUserHasAvatar,
                 otherUserGroup            = i.OtherUserGroup,
                 otherMemberLastReadAt     = i.OtherMemberLastReadAt,

@@ -21,13 +21,16 @@ namespace Chat.Api.Models
         public DateTime? LastSeenAt { get; set; }
 
         [MaxLength(50)]
-        public string? AvailabilityDays { get; set; }   // e.g. "Mon,Tue,Wed,Thu,Fri"
+        public string? AvailabilityDays { get; set; }   // legacy — kept for backward compat
 
         [MaxLength(10)]
-        public string? AvailabilityFrom { get; set; }   // e.g. "09:00"
+        public string? AvailabilityFrom { get; set; }   // legacy
 
         [MaxLength(10)]
-        public string? AvailabilityTo { get; set; }     // e.g. "17:00"
+        public string? AvailabilityTo { get; set; }     // legacy
+
+        // Per-day schedule: JSON array e.g. [{"day":"Mon","from":"09:00","to":"17:00"}]
+        public string? AvailabilitySchedule { get; set; }
 
         public bool MustChangePassword { get; set; } = false;
 

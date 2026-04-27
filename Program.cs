@@ -276,7 +276,7 @@ using (var scope = app.Services.CreateScope())
 
     // AddPasswordResetFields migration (stamped before Migrate() above; columns added here)
     AddColumnIfMissing("PasswordResetToken", "PasswordResetToken varchar(100) NULL");
-    AddColumnIfMissing("PasswordResetTokenExpiry", "PasswordResetTokenExpiry datetime(6) NULL");
+    AddColumnIfMissing("PasswordResetTokenExpiry", "PasswordResetTokenExpiry datetime NULL");
 
     // AddGroupAvatarKey migration — AvatarKey column on Chats table
     try

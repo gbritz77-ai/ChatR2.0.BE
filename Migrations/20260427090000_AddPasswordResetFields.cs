@@ -17,7 +17,7 @@ namespace ChatR2._0.Migrations
             migrationBuilder.Sql(@"
                 SET @db = DATABASE();
                 SET @e2 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=@db AND table_name='Users' AND column_name='PasswordResetTokenExpiry');
-                SET @s2 = IF(@e2=0, 'ALTER TABLE Users ADD COLUMN PasswordResetTokenExpiry datetime(6) NULL', 'SELECT 1');
+                SET @s2 = IF(@e2=0, 'ALTER TABLE Users ADD COLUMN PasswordResetTokenExpiry datetime NULL', 'SELECT 1');
                 PREPARE st FROM @s2; EXECUTE st; DEALLOCATE PREPARE st;
             ");
         }

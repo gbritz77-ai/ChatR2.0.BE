@@ -265,5 +265,80 @@ namespace Chat.Api.Controllers
 
             return Ok(new { message = $"Password reset to default for {user.Username}" });
         }
+
+        public record SetPasswordRequest(string NewPassword);
+
+        // POST api/users/{id}/set-password — Master only, set a specific password
+        [HttpPost("{id:guid}/set-password")]
+        [Authorize(Roles = "Master")]
+        public async Task<IActionResult> SetPassword(Guid id, [FromBody] SetPasswordRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request?.NewPassword) || request.NewPassword.Length < 8)
+                return BadRequest("Password must be at least 8 characters.");
+
+            var user = await _db.Users.FindAsync(id);
+            if (user == null) return NotFound();
+
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            user.MustChangePassword = false;
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"Password updated for {user.Username}" });
+        }
+
+        public record UpdateUserRequest(string Username, string Email, string Role, string? Group);
+
+        // PUT api/users/{id} — Master only, edit user details
+        [HttpPut("{id:guid}")]
+        [Authorize(Roles = "Master")]
+        public async Task<IActionResult> UpdateUser(Guid id, [FromBody] UpdateUserRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request?.Username) || string.IsNullOrWhiteSpace(request.Email))
+                return BadRequest("Username and email are required.");
+
+            if (!Enum.TryParse<UserRole>(request.Role, out var role))
+                return BadRequest("Invalid role.");
+
+            // Prevent editing self (the Master account)
+            var currentUserId = User.GetUserId();
+            if (id == currentUserId)
+                return BadRequest("You cannot edit your own account here.");
+
+            var user = await _db.Users.FindAsync(id);
+            if (user == null) return NotFound();
+
+            // Check for username/email conflicts on other users
+            var duplicate = await _db.Users.AnyAsync(u =>
+                u.Id != id && (u.Username == request.Username.Trim() || u.Email == request.Email.Trim()));
+            if (duplicate)
+                return Conflict("Another user already has that username or email.");
+
+            user.Username = request.Username.Trim();
+            user.Email = request.Email.Trim();
+            user.Role = role;
+            user.Group = string.IsNullOrWhiteSpace(request.Group) ? null : request.Group.Trim();
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = "User updated." });
+        }
+
+        // DELETE api/users/{id} — Master only, delete a user
+        [HttpDelete("{id:guid}")]
+        [Authorize(Roles = "Master")]
+        public async Task<IActionResult> DeleteUser(Guid id)
+        {
+            var currentUserId = User.GetUserId();
+            if (id == currentUserId)
+                return BadRequest("You cannot delete your own account.");
+
+            var user = await _db.Users.FindAsync(id);
+            if (user == null) return NotFound();
+
+            _db.Users.Remove(user);
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"User {user.Username} deleted." });
+        }
     }
 }

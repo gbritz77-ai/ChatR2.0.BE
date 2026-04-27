@@ -3,6 +3,7 @@ using Chat.Api.Auth;
 using Chat.Api.Data;
 using Chat.Api.DTOs.Auth;
 using Chat.Api.Models;
+using Chat.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,11 +21,13 @@ namespace Chat.Api.Controllers
     {
         private readonly ChatDbContext _db;
         private readonly IConfiguration _config;
+        private readonly IEmailService _email;
 
-        public AuthController(ChatDbContext db, IConfiguration config)
+        public AuthController(ChatDbContext db, IConfiguration config, IEmailService email)
         {
             _db = db;
             _config = config;
+            _email = email;
         }
 
         [HttpPost("register")]
@@ -133,6 +136,63 @@ namespace Chat.Api.Controllers
             await _db.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        /// <summary>
+        /// Sends a password-reset link to the user's email address.
+        /// Always returns 200 (to prevent user enumeration).
+        /// </summary>
+        [HttpPost("forgot-password")]
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request?.Email))
+                return BadRequest("Email is required.");
+
+            var email = request.Email.Trim();
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+            if (user != null)
+            {
+                // Generate a secure token and store it (1-hour expiry)
+                user.PasswordResetToken = Guid.NewGuid().ToString("N");
+                user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
+                await _db.SaveChangesAsync();
+
+                // Build reset link using configured AppUrl (or fallback)
+                var appUrl = _config["AppUrl"] ?? "https://main.d137tsnrxezsdg.amplifyapp.com";
+                var resetLink = $"{appUrl.TrimEnd('/')}/?reset={user.PasswordResetToken}";
+
+                await _email.SendPasswordResetAsync(user.Email, user.Username, resetLink);
+            }
+
+            // Always 200 — never reveal whether the email exists
+            return Ok(new { message = "If that email address is registered, a reset link has been sent." });
+        }
+
+        /// <summary>
+        /// Resets the user's password using a previously issued token.
+        /// </summary>
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request?.Token))
+                return BadRequest("Reset token is required.");
+
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
+                return BadRequest("New password must be at least 8 characters.");
+
+            var user = await _db.Users.FirstOrDefaultAsync(u => u.PasswordResetToken == request.Token);
+
+            if (user == null || user.PasswordResetTokenExpiry == null || user.PasswordResetTokenExpiry < DateTime.UtcNow)
+                return BadRequest("This reset link is invalid or has expired.");
+
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            user.PasswordResetToken = null;
+            user.PasswordResetTokenExpiry = null;
+            user.MustChangePassword = false;
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = "Password reset successfully. You can now log in." });
         }
 
         private bool TryGenerateJwt(User user, out string? token, out DateTime expiresAt, out string? error)

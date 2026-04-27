@@ -31,6 +31,11 @@ namespace Chat.Api.Models
 
         public bool MustChangePassword { get; set; } = false;
 
+        [MaxLength(100)]
+        public string? PasswordResetToken { get; set; }
+
+        public DateTime? PasswordResetTokenExpiry { get; set; }
+
         [MaxLength(500)]
         public string? AvatarKey { get; set; }
 

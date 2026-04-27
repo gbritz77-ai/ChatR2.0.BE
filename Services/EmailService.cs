@@ -66,5 +66,53 @@ Outsec Team"
 
             _logger.LogInformation("[EmailService] Invite sent to {Email}", toEmail);
         }
+
+        public async Task SendPasswordResetAsync(string toEmail, string username, string resetLink)
+        {
+            var smtp = _config.GetSection("Smtp");
+            var host = smtp["Host"];
+            var port = int.Parse(smtp["Port"] ?? "587");
+            var smtpUser = smtp["Username"];
+            var smtpPass = smtp["Password"];
+            var fromName = smtp["FromName"] ?? "ChatHub";
+            var fromEmail = smtp["FromEmail"] ?? smtpUser ?? "noreply@imptrack.co.za";
+
+            if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))
+            {
+                _logger.LogWarning("[EmailService] SMTP not configured — skipping password reset email to {Email}", toEmail);
+                return;
+            }
+
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress(fromName, fromEmail));
+            message.To.Add(new MailboxAddress(username, toEmail));
+            message.Subject = "ChatHub — Password Reset";
+            message.Body = new TextPart("plain")
+            {
+                Text = $@"Hi {username},
+
+We received a request to reset your ChatHub password.
+
+Click the link below to set a new password (valid for 1 hour):
+
+{resetLink}
+
+If you did not request a password reset, please ignore this email — your password will remain unchanged.
+
+Regards,
+Outsec Team"
+            };
+
+            var socketOptions = port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
+
+            using var client = new SmtpClient();
+            client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+            await client.ConnectAsync(host, port, socketOptions);
+            await client.AuthenticateAsync(smtpUser, smtpPass);
+            await client.SendAsync(message);
+            await client.DisconnectAsync(true);
+
+            _logger.LogInformation("[EmailService] Password reset email sent to {Email}", toEmail);
+        }
     }
 }

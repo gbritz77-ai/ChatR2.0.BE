@@ -151,22 +151,21 @@ namespace Chat.Api.Controllers
             var email = request.Email.Trim();
             var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email);
 
-            if (user != null)
-            {
-                // Generate a secure token and store it (1-hour expiry)
-                user.PasswordResetToken = Guid.NewGuid().ToString("N");
-                user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
-                await _db.SaveChangesAsync();
+            if (user == null)
+                return NotFound(new { message = "No account found with that email address." });
 
-                // Build reset link using configured AppUrl (or fallback)
-                var appUrl = _config["AppUrl"] ?? "https://main.d137tsnrxezsdg.amplifyapp.com";
-                var resetLink = $"{appUrl.TrimEnd('/')}/?reset={user.PasswordResetToken}";
+            // Generate a secure token and store it (1-hour expiry)
+            user.PasswordResetToken = Guid.NewGuid().ToString("N");
+            user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
+            await _db.SaveChangesAsync();
 
-                await _email.SendPasswordResetAsync(user.Email, user.Username, resetLink);
-            }
+            // Build reset link using configured AppUrl (or fallback)
+            var appUrl = _config["AppUrl"] ?? "https://main.d1imfsef8qotjc.amplifyapp.com";
+            var resetLink = $"{appUrl.TrimEnd('/')}/?reset={user.PasswordResetToken}";
 
-            // Always 200 — never reveal whether the email exists
-            return Ok(new { message = "If that email address is registered, a reset link has been sent." });
+            await _email.SendPasswordResetAsync(user.Email, user.Username, resetLink);
+
+            return Ok(new { message = "A password reset link has been sent to your email." });
         }
 
         /// <summary>

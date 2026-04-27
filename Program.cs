@@ -184,6 +184,12 @@ using (var scope = app.Services.CreateScope())
         "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
         "VALUES ('20260123125355_InitialCreate', '8.0.0')");
 
+    // Stamp AddPasswordResetFields before Migrate() — multi-statement SQL is unreliable
+    // with the Pomelo EF provider; columns are added manually below via ADO.NET instead.
+    db.Database.ExecuteSqlRaw(
+        "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+        "VALUES ('20260427090000_AddPasswordResetFields', '8.0.0')");
+
     db.Database.Migrate();
 
     // AddUserAvailability: stamp the migration as applied and add columns via raw
@@ -267,6 +273,10 @@ using (var scope = app.Services.CreateScope())
         "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
         "VALUES ('20260323000000_AddUserGroup', '8.0.0')");
     AddColumnIfMissing("Group", "`Group` varchar(100) NULL");
+
+    // AddPasswordResetFields migration (stamped before Migrate() above; columns added here)
+    AddColumnIfMissing("PasswordResetToken", "PasswordResetToken varchar(100) NULL");
+    AddColumnIfMissing("PasswordResetTokenExpiry", "PasswordResetTokenExpiry datetime(6) NULL");
 
     // AddGroupAvatarKey migration — AvatarKey column on Chats table
     try

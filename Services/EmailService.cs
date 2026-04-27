@@ -22,7 +22,7 @@ namespace Chat.Api.Services
             var port = int.Parse(smtp["Port"] ?? "587");
             var smtpUser = smtp["Username"];
             var smtpPass = smtp["Password"];
-            var fromName = smtp["FromName"] ?? "ChatR";
+            var fromName = smtp["FromName"] ?? "Chat Hub";
             var fromEmail = smtp["FromEmail"] ?? smtpUser ?? "noreply@imptrack.co.za";
 
             if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))
@@ -34,12 +34,12 @@ namespace Chat.Api.Services
             var message = new MimeMessage();
             message.From.Add(new MailboxAddress(fromName, fromEmail));
             message.To.Add(new MailboxAddress(username, toEmail));
-            message.Subject = "You've been invited to Outsec ChatR";
+            message.Subject = "You've been invited to Outsec Chat Hub";
             message.Body = new TextPart("plain")
             {
                 Text = $@"Hi {username},
 
-You have been invited to Outsec ChatR.
+You have been invited to Outsec Chat Hub.
 
 To get started, visit: {appUrl}
 
@@ -74,7 +74,7 @@ Outsec Team"
             var port = int.Parse(smtp["Port"] ?? "587");
             var smtpUser = smtp["Username"];
             var smtpPass = smtp["Password"];
-            var fromName = smtp["FromName"] ?? "ChatHub";
+            var fromName = smtp["FromName"] ?? "Chat Hub";
             var fromEmail = smtp["FromEmail"] ?? smtpUser ?? "noreply@imptrack.co.za";
 
             if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))

@@ -235,16 +235,17 @@ namespace Chat.Api.Controllers
             var appUrl = _config["AppUrl"] ?? "https://main.d1imfsef8qotjc.amplifyapp.com";
             try
             {
-                await _email.SendInviteAsync(email, username, appUrl);
+                // Always use the actual stored user record so the email shows the correct username
+                await _email.SendInviteAsync(user.Email, user.Username, appUrl);
             }
             catch (Exception ex)
             {
                 // Don't fail the invite if email sending fails — user was created
-                _logger.LogError(ex, "[Invite] SMTP failed for {Email}: {Message}", email, ex.Message);
+                _logger.LogError(ex, "[Invite] SMTP failed for {Email}: {Message}", user.Email, ex.Message);
                 return Ok(new { message = $"User invited but email could not be sent: {ex.Message}" });
             }
 
-            return Ok(new { message = $"Invitation sent to {email}" });
+            return Ok(new { message = $"Invitation sent to {user.Email}" });
         }
 
         // POST api/users/{id}/reset-password — Master only, resets to default temp password

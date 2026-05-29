@@ -338,6 +338,49 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning("[Migration] AddMessageReactions skipped: {Error}", ex.Message);
     }
 
+    // AddMeetings migration
+    try
+    {
+        using (var histCmd = conn.CreateCommand())
+        {
+            histCmd.CommandText =
+                "INSERT IGNORE INTO `__EFMigrationsHistory` (MigrationId, ProductVersion) " +
+                "VALUES ('20260529000000_AddMeetings', '8.0.0')";
+            histCmd.ExecuteNonQuery();
+        }
+        using var meetingsCmd = conn.CreateCommand();
+        meetingsCmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS Meetings (
+                Id char(36) NOT NULL,
+                Title varchar(200) NOT NULL,
+                StartsAt datetime NOT NULL,
+                EndsAt datetime NOT NULL,
+                CreatedByUserId char(36) NOT NULL,
+                CreatedAt datetime NOT NULL,
+                PRIMARY KEY (Id),
+                CONSTRAINT fk_meeting_creator FOREIGN KEY (CreatedByUserId) REFERENCES Users(Id) ON DELETE CASCADE
+            )";
+        meetingsCmd.ExecuteNonQuery();
+
+        using var invitesCmd = conn.CreateCommand();
+        invitesCmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS MeetingInvites (
+                Id char(36) NOT NULL,
+                MeetingId char(36) NOT NULL,
+                UserId char(36) NOT NULL,
+                Status int NOT NULL DEFAULT 0,
+                PRIMARY KEY (Id),
+                UNIQUE KEY uq_meeting_invite (MeetingId, UserId),
+                CONSTRAINT fk_invite_meeting FOREIGN KEY (MeetingId) REFERENCES Meetings(Id) ON DELETE CASCADE,
+                CONSTRAINT fk_invite_user FOREIGN KEY (UserId) REFERENCES Users(Id) ON DELETE CASCADE
+            )";
+        invitesCmd.ExecuteNonQuery();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning("[Migration] AddMeetings skipped: {Error}", ex.Message);
+    }
+
     conn.Close();
 
     // Seed Master user if none exists

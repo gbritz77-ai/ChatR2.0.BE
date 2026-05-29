@@ -114,5 +114,54 @@ Outsec Team"
 
             _logger.LogInformation("[EmailService] Password reset email sent to {Email}", toEmail);
         }
+
+        public async Task SendMeetingInviteAsync(string toEmail, string username, string organiserName, string title, DateTime startsAt, DateTime endsAt, string appUrl)
+        {
+            var smtp = _config.GetSection("Smtp");
+            var host = smtp["Host"];
+            var port = int.Parse(smtp["Port"] ?? "587");
+            var smtpUser = smtp["Username"];
+            var smtpPass = smtp["Password"];
+            var fromName = smtp["FromName"] ?? "Chat Hub";
+            var fromEmail = smtp["FromEmail"] ?? smtpUser ?? "noreply@imptrack.co.za";
+
+            if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))
+            {
+                _logger.LogWarning("[EmailService] SMTP not configured — skipping meeting invite email to {Email}", toEmail);
+                return;
+            }
+
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress(fromName, fromEmail));
+            message.To.Add(new MailboxAddress(username, toEmail));
+            message.Subject = $"Meeting Invite: {title}";
+            message.Body = new TextPart("plain")
+            {
+                Text = $@"Hi {username},
+
+{organiserName} has invited you to a meeting.
+
+Meeting: {title}
+Date:    {startsAt.ToLocalTime():dddd, dd MMMM yyyy}
+Time:    {startsAt.ToLocalTime():HH:mm} – {endsAt.ToLocalTime():HH:mm}
+
+To view and respond to the invite, visit:
+{appUrl}
+
+Regards,
+Outsec Team"
+            };
+
+            var socketOptions = port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
+
+            using var client = new SmtpClient();
+            client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+            await client.ConnectAsync(host, port, socketOptions);
+            await client.AuthenticateAsync(smtpUser, smtpPass);
+            await client.SendAsync(message);
+            await client.DisconnectAsync(true);
+
+            _logger.LogInformation("[EmailService] Meeting invite sent to {Email}", toEmail);
+        }
     }
 }

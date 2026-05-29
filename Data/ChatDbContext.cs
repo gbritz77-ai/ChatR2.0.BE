@@ -16,6 +16,8 @@ namespace Chat.Api.Data
         public DbSet<Message> Messages => Set<Message>();
         public DbSet<Attachment> Attachments => Set<Attachment>();
         public DbSet<MessageReaction> MessageReactions => Set<MessageReaction>();
+        public DbSet<Meeting> Meetings => Set<Meeting>();
+        public DbSet<MeetingInvite> MeetingInvites => Set<MeetingInvite>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -69,6 +71,28 @@ namespace Chat.Api.Data
             modelBuilder.Entity<User>()
                 .Property(u => u.Role)
                 .HasConversion<string>();
+
+            modelBuilder.Entity<Meeting>()
+                .HasOne(m => m.CreatedBy)
+                .WithMany()
+                .HasForeignKey(m => m.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<MeetingInvite>()
+                .HasOne(i => i.Meeting)
+                .WithMany(m => m.Invites)
+                .HasForeignKey(i => i.MeetingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<MeetingInvite>()
+                .HasOne(i => i.User)
+                .WithMany()
+                .HasForeignKey(i => i.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<MeetingInvite>()
+                .HasIndex(i => new { i.MeetingId, i.UserId })
+                .IsUnique();
         }
     }
 }

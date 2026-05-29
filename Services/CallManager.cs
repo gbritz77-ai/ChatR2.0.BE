@@ -8,6 +8,7 @@ namespace Chat.Api.Services
         public Guid CallerId { get; set; }
         public string CallerName { get; set; } = "";
         public Guid? ChatId { get; set; }
+        public Guid? MeetingId { get; set; }
         public ConcurrentDictionary<Guid, string> Participants { get; set; } = new(); // userId -> connectionId
         public ConcurrentDictionary<Guid, byte> PendingInvitees { get; set; } = new(); // users who are ringing but haven't answered
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -17,7 +18,7 @@ namespace Chat.Api.Services
     {
         private readonly ConcurrentDictionary<string, CallSession> _calls = new();
 
-        public CallSession CreateCall(Guid callerId, string callerName, Guid? chatId)
+        public CallSession CreateCall(Guid callerId, string callerName, Guid? chatId, Guid? meetingId = null)
         {
             var session = new CallSession
             {
@@ -25,10 +26,14 @@ namespace Chat.Api.Services
                 CallerId = callerId,
                 CallerName = callerName,
                 ChatId = chatId,
+                MeetingId = meetingId,
             };
             _calls[session.CallId] = session;
             return session;
         }
+
+        public CallSession? GetCallByMeetingId(Guid meetingId)
+            => _calls.Values.FirstOrDefault(s => s.MeetingId == meetingId);
 
         public bool TryGetCall(string callId, out CallSession? session)
             => _calls.TryGetValue(callId, out session);

@@ -267,6 +267,79 @@ namespace Chat.Api.Hubs
             await Clients.Caller.SendAsync("CallCreated", new { callId = session.CallId });
         }
 
+        // ─── Meeting Call ────────────────────────────────────────────────────────
+        // First participant creates the session and rings everyone else.
+        // Subsequent participants join the existing session directly.
+        public async Task JoinMeetingCall(string meetingId)
+        {
+            var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");
+            var callerName = Context.User?.Identity?.Name ?? "Unknown";
+
+            var meetingGuid = Guid.Parse(meetingId);
+            var meeting = await _db.Meetings
+                .Include(m => m.Invites)
+                .FirstOrDefaultAsync(m => m.Id == meetingGuid);
+
+            if (meeting == null) throw new HubException("Meeting not found");
+
+            bool isParticipant = meeting.CreatedByUserId == userId ||
+                meeting.Invites.Any(i => i.UserId == userId);
+
+            if (!isParticipant) throw new HubException("Not a participant of this meeting");
+
+            var existingCall = _calls.GetCallByMeetingId(meetingGuid);
+
+            if (existingCall != null)
+            {
+                // Join the already-running call
+                _calls.AddParticipant(existingCall.CallId, userId, Context.ConnectionId);
+                _calls.RemovePendingInvitee(existingCall.CallId, userId);
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{existingCall.CallId}");
+
+                var others = existingCall.Participants
+                    .Where(p => p.Key != userId)
+                    .Select(p => new { userId = p.Key.ToString(), connectionId = p.Value })
+                    .ToList();
+
+                await Clients.Caller.SendAsync("CallAccepted", new { callId = existingCall.CallId, participants = others });
+                await Clients.OthersInGroup($"call_{existingCall.CallId}").SendAsync("UserJoinedCall", new
+                {
+                    callId = existingCall.CallId,
+                    userId = userId.ToString(),
+                    connectionId = Context.ConnectionId
+                });
+            }
+            else
+            {
+                // First to join — create the session and ring everyone else
+                var session = _calls.CreateCall(userId, callerName, null, meetingGuid);
+                _calls.AddParticipant(session.CallId, userId, Context.ConnectionId);
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"call_{session.CallId}");
+
+                var participantIds = new HashSet<Guid>();
+                if (meeting.CreatedByUserId != userId)
+                    participantIds.Add(meeting.CreatedByUserId);
+                foreach (var invite in meeting.Invites)
+                    if (invite.UserId != userId)
+                        participantIds.Add(invite.UserId);
+
+                foreach (var participantId in participantIds)
+                {
+                    _calls.AddPendingInvitee(session.CallId, participantId);
+                    await Clients.Group($"user_{participantId}").SendAsync("IncomingCall", new
+                    {
+                        callId = session.CallId,
+                        callerId = userId.ToString(),
+                        callerName,
+                        meetingTitle = meeting.Title,
+                        isMeetingCall = true
+                    });
+                }
+
+                await Clients.Caller.SendAsync("CallCreated", new { callId = session.CallId });
+            }
+        }
+
         public async Task InviteToCall(string callId, string targetUserId)
         {
             var userId = Context.User?.GetUserId() ?? throw new HubException("Unauthenticated");

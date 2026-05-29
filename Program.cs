@@ -350,30 +350,32 @@ using (var scope = app.Services.CreateScope())
         }
         using var meetingsCmd = conn.CreateCommand();
         meetingsCmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS Meetings (
-                Id char(36) NOT NULL,
-                Title varchar(200) NOT NULL,
-                StartsAt datetime NOT NULL,
-                EndsAt datetime NOT NULL,
-                CreatedByUserId char(36) NOT NULL,
-                CreatedAt datetime NOT NULL,
-                PRIMARY KEY (Id),
-                CONSTRAINT fk_meeting_creator FOREIGN KEY (CreatedByUserId) REFERENCES Users(Id) ON DELETE CASCADE
-            )";
+            CREATE TABLE IF NOT EXISTS `Meetings` (
+                `Id` char(36) CHARACTER SET ascii NOT NULL,
+                `Title` varchar(200) NOT NULL,
+                `StartsAt` datetime NOT NULL,
+                `EndsAt` datetime NOT NULL,
+                `CreatedByUserId` char(36) CHARACTER SET ascii NOT NULL,
+                `CreatedAt` datetime NOT NULL,
+                PRIMARY KEY (`Id`),
+                KEY `IX_Meetings_CreatedByUserId` (`CreatedByUserId`),
+                CONSTRAINT `fk_meeting_creator` FOREIGN KEY (`CreatedByUserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         meetingsCmd.ExecuteNonQuery();
 
         using var invitesCmd = conn.CreateCommand();
         invitesCmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS MeetingInvites (
-                Id char(36) NOT NULL,
-                MeetingId char(36) NOT NULL,
-                UserId char(36) NOT NULL,
-                Status int NOT NULL DEFAULT 0,
-                PRIMARY KEY (Id),
-                UNIQUE KEY uq_meeting_invite (MeetingId, UserId),
-                CONSTRAINT fk_invite_meeting FOREIGN KEY (MeetingId) REFERENCES Meetings(Id) ON DELETE CASCADE,
-                CONSTRAINT fk_invite_user FOREIGN KEY (UserId) REFERENCES Users(Id) ON DELETE CASCADE
-            )";
+            CREATE TABLE IF NOT EXISTS `MeetingInvites` (
+                `Id` char(36) CHARACTER SET ascii NOT NULL,
+                `MeetingId` char(36) CHARACTER SET ascii NOT NULL,
+                `UserId` char(36) CHARACTER SET ascii NOT NULL,
+                `Status` int NOT NULL DEFAULT 0,
+                PRIMARY KEY (`Id`),
+                UNIQUE KEY `uq_meeting_invite` (`MeetingId`, `UserId`),
+                KEY `IX_MeetingInvites_UserId` (`UserId`),
+                CONSTRAINT `fk_invite_meeting` FOREIGN KEY (`MeetingId`) REFERENCES `Meetings` (`Id`) ON DELETE CASCADE,
+                CONSTRAINT `fk_invite_user` FOREIGN KEY (`UserId`) REFERENCES `Users` (`Id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         invitesCmd.ExecuteNonQuery();
     }
     catch (Exception ex)
